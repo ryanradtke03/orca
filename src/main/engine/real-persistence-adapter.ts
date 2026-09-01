@@ -1,29 +1,42 @@
-import { readFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
+import type { Project } from '../../shared/ipc-contract'
 import type { PersistenceAdapter } from './adapters'
 
 interface PersistedState {
   sessionCount?: number
+  projects?: Project[]
+}
+
+async function readState(stateFilePath: string): Promise<PersistedState> {
+  let raw: string
+  try {
+    raw = await readFile(stateFilePath, 'utf-8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw error
+  }
+
+  try {
+    return JSON.parse(raw) as PersistedState
+  } catch {
+    return {}
+  }
 }
 
 export function createRealPersistenceAdapter(stateFilePath: string): PersistenceAdapter {
   return {
     async loadSessionCount() {
-      let raw: string
-      try {
-        raw = await readFile(stateFilePath, 'utf-8')
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0
-        throw error
-      }
-
-      let state: PersistedState
-      try {
-        state = JSON.parse(raw) as PersistedState
-      } catch {
-        return 0
-      }
-
+      const state = await readState(stateFilePath)
       return typeof state.sessionCount === 'number' ? state.sessionCount : 0
+    },
+    async loadProjects() {
+      const state = await readState(stateFilePath)
+      return Array.isArray(state.projects) ? state.projects : []
+    },
+    async saveProjects(projects) {
+      const state = await readState(stateFilePath)
+      const updated: PersistedState = { ...state, projects }
+      await writeFile(stateFilePath, JSON.stringify(updated, null, 2))
     }
   }
 }

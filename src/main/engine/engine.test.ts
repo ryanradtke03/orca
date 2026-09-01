@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { createEngine } from './engine'
-import { createFakeProcessAdapter } from './fake-process-adapter'
+import { createFakeGitAdapter } from './fake-git-adapter'
 import { createFakePersistenceAdapter } from './fake-persistence-adapter'
 
 describe('Engine.ping', () => {
   it('reports ok status and the session count from the persistence adapter', async () => {
     const persistence = createFakePersistenceAdapter({ sessionCount: 3 })
-    const process = createFakeProcessAdapter()
-    const engine = createEngine({ persistence, process })
+    const git = createFakeGitAdapter()
+    const engine = createEngine({ persistence, git })
 
     const result = await engine.ping()
 
@@ -16,8 +16,8 @@ describe('Engine.ping', () => {
 
   it('defaults to zero sessions when nothing has been persisted', async () => {
     const persistence = createFakePersistenceAdapter()
-    const process = createFakeProcessAdapter()
-    const engine = createEngine({ persistence, process })
+    const git = createFakeGitAdapter()
+    const engine = createEngine({ persistence, git })
 
     const result = await engine.ping()
 
@@ -25,25 +25,29 @@ describe('Engine.ping', () => {
   })
 })
 
-describe('Engine.spawnProcess', () => {
-  it('delegates to the Process adapter, passing the cwd through', async () => {
+describe('Engine.createWorktree', () => {
+  it('delegates to the Git adapter, passing the project path through', async () => {
     const persistence = createFakePersistenceAdapter()
-    const process = createFakeProcessAdapter({ pid: 4242 })
-    const engine = createEngine({ persistence, process })
+    const git = createFakeGitAdapter()
+    const engine = createEngine({ persistence, git })
 
-    const result = await engine.spawnProcess('/tmp/my-project/worktree-1')
+    const result = await engine.createWorktree('/tmp/my-project')
 
-    expect(result).toEqual({ pid: 4242 })
+    expect(result).toEqual({
+      worktreePath: '/tmp/my-project/worktree-1',
+      branch: 'orca-session-fake-1'
+    })
   })
 
-  it('returns a distinct process for each call', async () => {
+  it('returns a distinct worktree for each call', async () => {
     const persistence = createFakePersistenceAdapter()
-    const process = createFakeProcessAdapter()
-    const engine = createEngine({ persistence, process })
+    const git = createFakeGitAdapter()
+    const engine = createEngine({ persistence, git })
 
-    const first = await engine.spawnProcess('/tmp/my-project/worktree-1')
-    const second = await engine.spawnProcess('/tmp/my-project/worktree-2')
+    const first = await engine.createWorktree('/tmp/my-project')
+    const second = await engine.createWorktree('/tmp/my-project')
 
-    expect(first.pid).not.toBe(second.pid)
+    expect(first.worktreePath).not.toBe(second.worktreePath)
+    expect(first.branch).not.toBe(second.branch)
   })
 })
