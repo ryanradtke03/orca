@@ -28,4 +28,5 @@ export interface ProcessAdapter {
 export interface EngineAdapters {
   persistence: PersistenceAdapter
   git: GitAdapter
+  process: ProcessAdapter
 }

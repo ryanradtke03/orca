@@ -1,4 +1,4 @@
-import type { Project } from '../../shared/ipc-contract'
+import type { Project, Session } from '../../shared/ipc-contract'
 
 const app = document.querySelector<HTMLDivElement>('#app')
 
@@ -24,7 +24,21 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function renderProjectList(projects: Project[]): void {
+function renderSessionList(sessions: Session[]): HTMLUListElement {
+  const ul = document.createElement('ul')
+  ul.className = 'session-list'
+
+  for (const session of sessions) {
+    const li = document.createElement('li')
+    li.textContent = session.branch
+    li.title = session.worktreePath
+    ul.appendChild(li)
+  }
+
+  return ul
+}
+
+function renderProjectList(projects: Project[], sessions: Session[]): void {
   const list = document.querySelector<HTMLDivElement>('#project-list')
   if (!list) return
 
@@ -41,17 +55,34 @@ function renderProjectList(projects: Project[]): void {
   const ul = document.createElement('ul')
   for (const project of projects) {
     const li = document.createElement('li')
-    li.textContent = project.name
-    li.title = project.path
+
+    const name = document.createElement('span')
+    name.textContent = project.name
+    name.title = project.path
+    li.appendChild(name)
+
+    const newSessionButton = document.createElement('button')
+    newSessionButton.type = 'button'
+    newSessionButton.className = 'new-session-button'
+    newSessionButton.textContent = 'New Session'
+    newSessionButton.dataset.projectId = project.id
+    li.appendChild(newSessionButton)
+
+    const projectSessions = sessions.filter((session) => session.projectId === project.id)
+    li.appendChild(renderSessionList(projectSessions))
+
     ul.appendChild(li)
   }
   list.appendChild(ul)
 }
 
-async function refreshProjects(): Promise<void> {
+async function refreshAll(): Promise<void> {
   try {
-    const projects = await window.orca.listProjects()
-    renderProjectList(projects)
+    const [projects, sessions] = await Promise.all([
+      window.orca.listProjects(),
+      window.orca.listSessions()
+    ])
+    renderProjectList(projects, sessions)
     setStatus('')
   } catch (error) {
     setStatus(`Failed to load projects: ${describeError(error)}`)
@@ -62,10 +93,30 @@ async function handleAddProject(): Promise<void> {
   try {
     const project = await window.orca.addProjectViaDialog()
     if (!project) return
-    await refreshProjects()
+    await refreshAll()
   } catch (error) {
     setStatus(`Failed to add project: ${describeError(error)}`)
   }
+}
+
+async function handleNewSession(projectId: string): Promise<void> {
+  try {
+    await window.orca.spawnSession(projectId)
+    await refreshAll()
+  } catch (error) {
+    setStatus(`Failed to spawn session: ${describeError(error)}`)
+  }
+}
+
+function handleProjectListClick(event: Event): void {
+  const target = event.target
+  if (!(target instanceof HTMLElement)) return
+
+  const button = target.closest<HTMLButtonElement>('.new-session-button')
+  const projectId = button?.dataset.projectId
+  if (!projectId) return
+
+  void handleNewSession(projectId)
 }
 
 async function render(): Promise<void> {
@@ -74,7 +125,10 @@ async function render(): Promise<void> {
   const addButton = document.querySelector<HTMLButtonElement>('#add-project-button')
   addButton?.addEventListener('click', () => void handleAddProject())
 
-  await refreshProjects()
+  const projectList = document.querySelector<HTMLDivElement>('#project-list')
+  projectList?.addEventListener('click', handleProjectListClick)
+
+  await refreshAll()
 }
 
 void render()

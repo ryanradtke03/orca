@@ -2,17 +2,22 @@ import type { ProcessAdapter, ProcessInfo } from './adapters'
 
 export interface FakeProcessAdapter extends ProcessAdapter {
   simulateExit(pid: number, code: number): void
+  spawnedCwds: string[]
 }
 
 export function createFakeProcessAdapter(seed: { pid?: number } = {}): FakeProcessAdapter {
   let counter = 0
   const processes = new Map<number, { alive: boolean; exitCode: number | null }>()
+  const spawnedCwds: string[] = []
 
   return {
-    async spawnClaude(): Promise<ProcessInfo> {
+    spawnedCwds,
+
+    async spawnClaude(cwd: string): Promise<ProcessInfo> {
       counter += 1
       const pid = seed.pid ?? 1000 + counter
       processes.set(pid, { alive: true, exitCode: null })
+      spawnedCwds.push(cwd)
       return { pid }
     },
 

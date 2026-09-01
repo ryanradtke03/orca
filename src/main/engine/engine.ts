@@ -1,14 +1,22 @@
-import type { PingResult } from '../../shared/ipc-contract'
+import { randomUUID } from 'crypto'
+import { basename } from 'path'
+import type { PingResult, Project, Session } from '../../shared/ipc-contract'
 import type { EngineAdapters, WorktreeInfo } from './adapters'
 
 export interface Engine {
   ping(): Promise<PingResult>
+  listProjects(): Promise<Project[]>
+  addProject(path: string): Promise<Project>
   createWorktree(projectPath: string): Promise<WorktreeInfo>
+  spawnSession(projectId: string): Promise<Session>
+  listSessions(): Promise<Session[]>
 }
 
 export function createEngine(adapters: EngineAdapters): Engine {
   let projects: Project[] | undefined
-  // Serializes addProject calls so a concurrent read-modify-write can't drop a write.
+  let sessions: Session[] = []
+  // Serializes addProject calls, and reads that must not observe a write mid-flight,
+  // so a concurrent read-modify-write can't drop a write or return a stale project list.
   let writeQueue: Promise<unknown> = Promise.resolve()
 
   async function loadProjects(): Promise<Project[]> {
@@ -33,13 +41,38 @@ export function createEngine(adapters: EngineAdapters): Engine {
     return result
   }
 
+  async function spawnSession(projectId: string): Promise<Session> {
+    await writeQueue
+    const existing = await loadProjects()
+    const project = existing.find((candidate) => candidate.id === projectId)
+    if (!project) {
+      throw new Error(`Unknown project: ${projectId}`)
+    }
+
+    const { worktreePath, branch } = await adapters.git.createWorktree(project.path)
+    const { pid } = await adapters.process.spawnClaude(worktreePath)
+
+    const session: Session = { id: randomUUID(), projectId, worktreePath, branch, pid }
+    sessions = [...sessions, session]
+
+    return session
+  }
+
   return {
     async ping() {
       const sessionCount = await adapters.persistence.loadSessionCount()
       return { ok: true, sessionCount }
     },
+    async listProjects() {
+      return loadProjects()
+    },
+    addProject,
     async createWorktree(projectPath: string) {
       return adapters.git.createWorktree(projectPath)
+    },
+    spawnSession,
+    async listSessions() {
+      return sessions
     }
   }
 }
