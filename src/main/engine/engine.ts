@@ -1,8 +1,9 @@
 import type { PingResult } from '../../shared/ipc-contract'
-import type { EngineAdapters } from './adapters'
+import type { EngineAdapters, WorktreeInfo } from './adapters'
 
 export interface Engine {
   ping(): Promise<PingResult>
+  createWorktree(projectPath: string): Promise<WorktreeInfo>
 }
 
 export function createEngine(adapters: EngineAdapters): Engine {
@@ -10,6 +11,9 @@ export function createEngine(adapters: EngineAdapters): Engine {
     async ping() {
       const sessionCount = await adapters.persistence.loadSessionCount()
       return { ok: true, sessionCount }
+    },
+    async createWorktree(projectPath: string) {
+      return adapters.git.createWorktree(projectPath)
     }
   }
 }
