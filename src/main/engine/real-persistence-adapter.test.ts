@@ -44,4 +44,41 @@ describe('createRealPersistenceAdapter', () => {
 
     await expect(adapter.loadSessionCount()).resolves.toBe(0)
   })
+
+  it('defaults to an empty list when no state file exists yet', async () => {
+    const adapter = createRealPersistenceAdapter(join(dir, 'state.json'))
+
+    await expect(adapter.loadProjects()).resolves.toEqual([])
+  })
+
+  it('reads back projects that were saved', async () => {
+    const stateFilePath = join(dir, 'state.json')
+    const adapter = createRealPersistenceAdapter(stateFilePath)
+    const projects = [{ id: '1', path: '/tmp/foo', name: 'foo' }]
+
+    await adapter.saveProjects(projects)
+
+    await expect(adapter.loadProjects()).resolves.toEqual(projects)
+  })
+
+  it('persists projects across separate adapter instances backed by the same file', async () => {
+    const stateFilePath = join(dir, 'state.json')
+    const projects = [{ id: '1', path: '/tmp/foo', name: 'foo' }]
+
+    await createRealPersistenceAdapter(stateFilePath).saveProjects(projects)
+
+    await expect(createRealPersistenceAdapter(stateFilePath).loadProjects()).resolves.toEqual(
+      projects
+    )
+  })
+
+  it('saving projects does not clobber a previously persisted session count', async () => {
+    const stateFilePath = join(dir, 'state.json')
+    await writeFile(stateFilePath, JSON.stringify({ sessionCount: 5 }))
+    const adapter = createRealPersistenceAdapter(stateFilePath)
+
+    await adapter.saveProjects([{ id: '1', path: '/tmp/foo', name: 'foo' }])
+
+    await expect(adapter.loadSessionCount()).resolves.toBe(5)
+  })
 })
