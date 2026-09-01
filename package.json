@@ -1,0 +1,43 @@
+{
+  "name": "orca",
+  "version": "1.0.0",
+  "description": "Electron desktop app for orchestrating multiple Claude Code CLI sessions",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryanradtke03/orca.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ryanradtke03/orca/issues"
+  },
+  "homepage": "https://github.com/ryanradtke03/orca#readme",
+  "private": true,
+  "dependencies": {
+    "electron": "44.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "electron-vite": "5.0.0",
+    "eslint": "10.9.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.69.0",
+    "vite": "7.3.6",
+    "vitest": "4.1.11"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
+  }
+}
