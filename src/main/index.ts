@@ -1,5 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
+import { createProductionEngine } from './composition-root'
+import { registerIpcHandlers } from './ipc'
 
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -23,6 +25,9 @@ function createMainWindow(): void {
 }
 
 app.whenReady().then(() => {
+  const engine = createProductionEngine()
+  registerIpcHandlers(engine)
+
   createMainWindow()
 
   app.on('activate', () => {

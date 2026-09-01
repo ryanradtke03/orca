@@ -1,9 +1,5 @@
+import type { PingResult } from '../../shared/ipc-contract'
 import type { EngineAdapters } from './adapters'
-
-export interface PingResult {
-  ok: true
-  sessionCount: number
-}
 
 export interface Engine {
   ping(): Promise<PingResult>
