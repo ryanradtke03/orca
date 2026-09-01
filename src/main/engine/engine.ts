@@ -1,12 +1,9 @@
-import { randomUUID } from 'crypto'
-import { basename } from 'path'
-import type { PingResult, Project } from '../../shared/ipc-contract'
-import type { EngineAdapters } from './adapters'
+import type { PingResult } from '../../shared/ipc-contract'
+import type { EngineAdapters, WorktreeInfo } from './adapters'
 
 export interface Engine {
   ping(): Promise<PingResult>
-  listProjects(): Promise<Project[]>
-  addProject(path: string): Promise<Project>
+  createWorktree(projectPath: string): Promise<WorktreeInfo>
 }
 
 export function createEngine(adapters: EngineAdapters): Engine {
@@ -41,9 +38,8 @@ export function createEngine(adapters: EngineAdapters): Engine {
       const sessionCount = await adapters.persistence.loadSessionCount()
       return { ok: true, sessionCount }
     },
-    async listProjects() {
-      return loadProjects()
-    },
-    addProject
+    async createWorktree(projectPath: string) {
+      return adapters.git.createWorktree(projectPath)
+    }
   }
 }

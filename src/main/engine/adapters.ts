@@ -6,6 +6,16 @@ export interface PersistenceAdapter {
   saveProjects(projects: Project[]): Promise<void>
 }
 
+export interface WorktreeInfo {
+  worktreePath: string
+  branch: string
+}
+
+export interface GitAdapter {
+  createWorktree(projectPath: string): Promise<WorktreeInfo>
+}
+
 export interface EngineAdapters {
   persistence: PersistenceAdapter
+  git: GitAdapter
 }
