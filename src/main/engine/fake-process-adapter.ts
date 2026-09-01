@@ -1,0 +1,31 @@
+import type { ProcessAdapter, ProcessInfo } from './adapters'
+
+export interface FakeProcessAdapter extends ProcessAdapter {
+  simulateExit(pid: number, code: number): void
+}
+
+export function createFakeProcessAdapter(seed: { pid?: number } = {}): FakeProcessAdapter {
+  let counter = 0
+  const processes = new Map<number, { alive: boolean; exitCode: number | null }>()
+
+  return {
+    async spawnClaude(): Promise<ProcessInfo> {
+      counter += 1
+      const pid = seed.pid ?? 1000 + counter
+      processes.set(pid, { alive: true, exitCode: null })
+      return { pid }
+    },
+
+    isAlive(pid: number): boolean {
+      return processes.get(pid)?.alive ?? false
+    },
+
+    exitCode(pid: number): number | null {
+      return processes.get(pid)?.exitCode ?? null
+    },
+
+    simulateExit(pid: number, code: number): void {
+      processes.set(pid, { alive: false, exitCode: code })
+    }
+  }
+}
