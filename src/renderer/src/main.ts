@@ -1,5 +1,7 @@
 import type { Project, Session } from '../../shared/ipc-contract'
 
+const SESSION_STATUS_POLL_INTERVAL_MS = 2000
+
 const app = document.querySelector<HTMLDivElement>('#app')
 
 function renderShell(): void {
@@ -30,8 +32,19 @@ function renderSessionList(sessions: Session[]): HTMLUListElement {
 
   for (const session of sessions) {
     const li = document.createElement('li')
-    li.textContent = session.branch
     li.title = session.worktreePath
+    li.dataset.sessionId = session.id
+
+    const label = document.createElement('span')
+    label.textContent = session.branch
+    li.appendChild(label)
+
+    const statusBadge = document.createElement('span')
+    statusBadge.className = 'session-status'
+    statusBadge.dataset.status = session.status
+    statusBadge.textContent = session.status
+    li.appendChild(statusBadge)
+
     ul.appendChild(li)
   }
 
@@ -108,6 +121,26 @@ async function handleNewSession(projectId: string): Promise<void> {
   }
 }
 
+function updateSessionStatusBadges(sessions: Session[]): void {
+  for (const session of sessions) {
+    const badge = document.querySelector<HTMLSpanElement>(
+      `li[data-session-id="${session.id}"] .session-status`
+    )
+    if (!badge) continue
+    badge.dataset.status = session.status
+    badge.textContent = session.status
+  }
+}
+
+async function pollSessionStatuses(): Promise<void> {
+  try {
+    const sessions = await window.orca.listSessions()
+    updateSessionStatusBadges(sessions)
+  } catch (error) {
+    setStatus(`Failed to refresh session statuses: ${describeError(error)}`)
+  }
+}
+
 function handleProjectListClick(event: Event): void {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
@@ -129,6 +162,8 @@ async function render(): Promise<void> {
   projectList?.addEventListener('click', handleProjectListClick)
 
   await refreshAll()
+
+  setInterval(() => void pollSessionStatuses(), SESSION_STATUS_POLL_INTERVAL_MS)
 }
 
 void render()

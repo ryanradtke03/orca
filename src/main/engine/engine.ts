@@ -10,6 +10,7 @@ export interface Engine {
   createWorktree(projectPath: string): Promise<WorktreeInfo>
   spawnSession(projectId: string): Promise<Session>
   listSessions(): Promise<Session[]>
+  refreshSessionStatuses(): Promise<Session[]>
 }
 
 export function createEngine(adapters: EngineAdapters): Engine {
@@ -52,10 +53,43 @@ export function createEngine(adapters: EngineAdapters): Engine {
     const { worktreePath, branch } = await adapters.git.createWorktree(project.path)
     const { pid } = await adapters.process.spawnClaude(worktreePath)
 
-    const session: Session = { id: randomUUID(), projectId, worktreePath, branch, pid }
+    const session: Session = {
+      id: randomUUID(),
+      projectId,
+      worktreePath,
+      branch,
+      pid,
+      status: 'running'
+    }
     sessions = [...sessions, session]
 
     return session
+  }
+
+  function refreshSessionStatuses(): Promise<Session[]> {
+    sessions = sessions.map((session) => {
+      if (session.status !== 'running') return session
+      if (adapters.process.isAlive(session.pid)) return session
+
+      const exitCode = adapters.process.exitCode(session.pid)
+      if (exitCode === 0) {
+        adapters.notification.notify({
+          title: 'Session finished',
+          body: `${session.branch} finished successfully.`,
+          urgency: 'low'
+        })
+        return { ...session, status: 'done' }
+      }
+
+      adapters.notification.notify({
+        title: 'Session errored',
+        body: `${session.branch} exited unexpectedly.`,
+        urgency: 'critical'
+      })
+      return { ...session, status: 'errored' }
+    })
+
+    return Promise.resolve(sessions)
   }
 
   return {
@@ -73,6 +107,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     spawnSession,
     async listSessions() {
       return sessions
-    }
+    },
+    refreshSessionStatuses
   }
 }

@@ -3,6 +3,8 @@ import { join } from 'path'
 import { createProductionEngine } from './composition-root'
 import { registerIpcHandlers } from './ipc'
 
+const SESSION_STATUS_POLL_INTERVAL_MS = 2000
+
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 900,
@@ -32,6 +34,12 @@ app.whenReady().then(() => {
 
   const engine = createProductionEngine()
   registerIpcHandlers(engine)
+
+  setInterval(() => {
+    engine.refreshSessionStatuses().catch((error) => {
+      console.error('Failed to refresh session statuses:', error)
+    })
+  }, SESSION_STATUS_POLL_INTERVAL_MS)
 
   createMainWindow()
 

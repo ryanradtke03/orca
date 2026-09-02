@@ -6,7 +6,8 @@ const orca: OrcaApi = {
   listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listProjects),
   addProjectViaDialog: () => ipcRenderer.invoke(IPC_CHANNELS.addProjectViaDialog),
   spawnSession: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.spawnSession, projectId),
-  listSessions: () => ipcRenderer.invoke(IPC_CHANNELS.listSessions)
+  listSessions: () => ipcRenderer.invoke(IPC_CHANNELS.listSessions),
+  refreshSessionStatuses: () => ipcRenderer.invoke(IPC_CHANNELS.refreshSessionStatuses)
 }
 
 contextBridge.exposeInMainWorld('orca', orca)
