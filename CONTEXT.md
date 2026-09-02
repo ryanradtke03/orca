@@ -17,7 +17,7 @@ The git diff of the changes a Session has made in its working directory, shown i
 _Avoid_: Changes, patch
 
 **Session Status**:
-The lifecycle state of a Session: Running (actively working), Waiting on permission (paused on a tool-permission prompt), Waiting on input (paused, needs a reply from the user), Idle (process alive, nothing in flight), Done (exited successfully), or Errored (exited/crashed abnormally).
+The lifecycle state of a Session: Running (actively working), Waiting on permission (paused on a tool-permission prompt), Waiting on input (paused, needs a reply from the user), Idle (process alive, nothing in flight), Done (exited successfully), Errored (exited/crashed abnormally), or Stopped (killed by the user via Orca before finishing on its own).
 
 **Permission prompt**:
 A pause point where a Session requests the user's approval before running a tool. Orca surfaces these directly in its UI so the user can approve or deny without switching to a terminal.

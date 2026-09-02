@@ -9,7 +9,14 @@ export interface Project {
   name: string
 }
 
-export type SessionStatus = 'running' | 'idle' | 'done' | 'errored'
+export type SessionStatus =
+  | 'running'
+  | 'waiting-on-permission'
+  | 'waiting-on-input'
+  | 'idle'
+  | 'done'
+  | 'errored'
+  | 'stopped'
 
 export interface Session {
   id: string
@@ -26,7 +33,8 @@ export const IPC_CHANNELS = {
   addProjectViaDialog: 'project:add-via-dialog',
   spawnSession: 'session:spawn',
   listSessions: 'session:list',
-  refreshSessionStatuses: 'session:refresh-statuses'
+  refreshSessionStatuses: 'session:refresh-statuses',
+  stopSession: 'session:stop'
 } as const
 
 export interface OrcaApi {
@@ -36,4 +44,5 @@ export interface OrcaApi {
   spawnSession(projectId: string): Promise<Session>
   listSessions(): Promise<Session[]>
   refreshSessionStatuses(): Promise<Session[]>
+  stopSession(sessionId: string): Promise<Session>
 }

@@ -11,6 +11,7 @@ export interface Engine {
   spawnSession(projectId: string): Promise<Session>
   listSessions(): Promise<Session[]>
   refreshSessionStatuses(): Promise<Session[]>
+  stopSession(sessionId: string): Promise<Session>
 }
 
 export function createEngine(adapters: EngineAdapters): Engine {
@@ -92,6 +93,20 @@ export function createEngine(adapters: EngineAdapters): Engine {
     return Promise.resolve(sessions)
   }
 
+  async function stopSession(sessionId: string): Promise<Session> {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+
+    await adapters.process.stop(session.pid)
+
+    const stopped: Session = { ...session, status: 'stopped' }
+    sessions = sessions.map((candidate) => (candidate.id === sessionId ? stopped : candidate))
+
+    return stopped
+  }
+
   return {
     async ping() {
       const sessionCount = await adapters.persistence.loadSessionCount()
@@ -108,6 +123,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     async listSessions() {
       return sessions
     },
-    refreshSessionStatuses
+    refreshSessionStatuses,
+    stopSession
   }
 }

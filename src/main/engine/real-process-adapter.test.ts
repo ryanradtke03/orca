@@ -65,6 +65,27 @@ describe('createRealProcessAdapter', () => {
     expect(adapter.exitCode(pid)).toBe(7)
   })
 
+  it('stops a running process, marking it not alive', async () => {
+    const adapter = createRealProcessAdapter('node', ['-e', 'setTimeout(() => {}, 5000)'])
+
+    const { pid } = await adapter.spawnClaude(dir)
+    expect(adapter.isAlive(pid)).toBe(true)
+
+    await adapter.stop(pid)
+
+    await waitUntil(() => !adapter.isAlive(pid))
+    expect(isOsProcessAlive(pid)).toBe(false)
+  })
+
+  it('resolves without throwing when stopping a pid that is already gone', async () => {
+    const adapter = createRealProcessAdapter('node', ['-e', 'process.exit(0)'])
+
+    const { pid } = await adapter.spawnClaude(dir)
+    await waitUntil(() => !adapter.isAlive(pid))
+
+    await expect(adapter.stop(pid)).resolves.toBeUndefined()
+  })
+
   it('rejects when the command cannot be spawned', async () => {
     const adapter = createRealProcessAdapter('orca-nonexistent-command-xyz')
 

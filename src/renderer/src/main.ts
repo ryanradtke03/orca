@@ -26,6 +26,12 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+const STOPPABLE_STATUSES: ReadonlySet<Session['status']> = new Set([
+  'running',
+  'waiting-on-permission',
+  'waiting-on-input'
+])
+
 function renderSessionList(sessions: Session[]): HTMLUListElement {
   const ul = document.createElement('ul')
   ul.className = 'session-list'
@@ -44,6 +50,15 @@ function renderSessionList(sessions: Session[]): HTMLUListElement {
     statusBadge.dataset.status = session.status
     statusBadge.textContent = session.status
     li.appendChild(statusBadge)
+
+    if (STOPPABLE_STATUSES.has(session.status)) {
+      const stopButton = document.createElement('button')
+      stopButton.type = 'button'
+      stopButton.className = 'stop-session-button'
+      stopButton.textContent = 'Stop'
+      stopButton.dataset.sessionId = session.id
+      li.appendChild(stopButton)
+    }
 
     ul.appendChild(li)
   }
@@ -121,23 +136,48 @@ async function handleNewSession(projectId: string): Promise<void> {
   }
 }
 
-function updateSessionStatusBadges(sessions: Session[]): void {
+function updateSessionRows(sessions: Session[]): void {
   for (const session of sessions) {
-    const badge = document.querySelector<HTMLSpanElement>(
-      `li[data-session-id="${session.id}"] .session-status`
-    )
-    if (!badge) continue
-    badge.dataset.status = session.status
-    badge.textContent = session.status
+    const li = document.querySelector<HTMLLIElement>(`li[data-session-id="${session.id}"]`)
+    if (!li) continue
+
+    const badge = li.querySelector<HTMLSpanElement>('.session-status')
+    if (badge) {
+      badge.dataset.status = session.status
+      badge.textContent = session.status
+    }
+
+    const existingStopButton = li.querySelector<HTMLButtonElement>('.stop-session-button')
+    if (STOPPABLE_STATUSES.has(session.status)) {
+      if (!existingStopButton) {
+        const stopButton = document.createElement('button')
+        stopButton.type = 'button'
+        stopButton.className = 'stop-session-button'
+        stopButton.textContent = 'Stop'
+        stopButton.dataset.sessionId = session.id
+        li.appendChild(stopButton)
+      }
+    } else {
+      existingStopButton?.remove()
+    }
   }
 }
 
 async function pollSessionStatuses(): Promise<void> {
   try {
     const sessions = await window.orca.listSessions()
-    updateSessionStatusBadges(sessions)
+    updateSessionRows(sessions)
   } catch (error) {
     setStatus(`Failed to refresh session statuses: ${describeError(error)}`)
+  }
+}
+
+async function handleStopSession(sessionId: string): Promise<void> {
+  try {
+    await window.orca.stopSession(sessionId)
+    await refreshAll()
+  } catch (error) {
+    setStatus(`Failed to stop session: ${describeError(error)}`)
   }
 }
 
@@ -145,11 +185,16 @@ function handleProjectListClick(event: Event): void {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
 
-  const button = target.closest<HTMLButtonElement>('.new-session-button')
-  const projectId = button?.dataset.projectId
-  if (!projectId) return
+  const newSessionButton = target.closest<HTMLButtonElement>('.new-session-button')
+  if (newSessionButton?.dataset.projectId) {
+    void handleNewSession(newSessionButton.dataset.projectId)
+    return
+  }
 
-  void handleNewSession(projectId)
+  const stopSessionButton = target.closest<HTMLButtonElement>('.stop-session-button')
+  if (stopSessionButton?.dataset.sessionId) {
+    void handleStopSession(stopSessionButton.dataset.sessionId)
+  }
 }
 
 async function render(): Promise<void> {

@@ -45,6 +45,20 @@ export function createRealProcessAdapter(
       })
     },
 
+    async stop(pid: number): Promise<void> {
+      try {
+        // Sessions are spawned detached (their own process group leader), so
+        // signal the whole group to also reach any subprocesses `claude` started.
+        process.kill(-pid, 'SIGTERM')
+      } catch {
+        try {
+          process.kill(pid, 'SIGTERM')
+        } catch {
+          // Already exited.
+        }
+      }
+    },
+
     isAlive(pid: number): boolean {
       return processes.get(pid)?.alive ?? false
     },
