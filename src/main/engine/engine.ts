@@ -10,6 +10,7 @@ export interface Engine {
   createWorktree(projectPath: string): Promise<WorktreeInfo>
   spawnSession(projectId: string): Promise<Session>
   listSessions(): Promise<Session[]>
+  stopSession(sessionId: string): Promise<Session>
 }
 
 export function createEngine(adapters: EngineAdapters): Engine {
@@ -52,10 +53,31 @@ export function createEngine(adapters: EngineAdapters): Engine {
     const { worktreePath, branch } = await adapters.git.createWorktree(project.path)
     const { pid } = await adapters.process.spawnClaude(worktreePath)
 
-    const session: Session = { id: randomUUID(), projectId, worktreePath, branch, pid }
+    const session: Session = {
+      id: randomUUID(),
+      projectId,
+      worktreePath,
+      branch,
+      pid,
+      status: 'running'
+    }
     sessions = [...sessions, session]
 
     return session
+  }
+
+  async function stopSession(sessionId: string): Promise<Session> {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+
+    await adapters.process.stop(session.pid)
+
+    const stopped: Session = { ...session, status: 'stopped' }
+    sessions = sessions.map((candidate) => (candidate.id === sessionId ? stopped : candidate))
+
+    return stopped
   }
 
   return {
@@ -73,6 +95,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     spawnSession,
     async listSessions() {
       return sessions
-    }
+    },
+    stopSession
   }
 }

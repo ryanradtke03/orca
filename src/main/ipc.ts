@@ -24,4 +24,8 @@ export function registerIpcHandlers(engine: Engine): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.listSessions, () => engine.listSessions())
+
+  ipcMain.handle(IPC_CHANNELS.stopSession, (_event, sessionId: string) =>
+    engine.stopSession(sessionId)
+  )
 }

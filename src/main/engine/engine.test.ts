@@ -214,4 +214,82 @@ describe('Engine.listSessions', () => {
 
     await expect(engine.listSessions()).resolves.toEqual([])
   })
+
+  it('reports a freshly spawned session as running', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project' }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter })
+
+    const session = await engine.spawnSession('project-1')
+
+    expect(session.status).toBe('running')
+  })
+})
+
+describe('Engine.stopSession', () => {
+  async function spawnRunningSession(processAdapter = createFakeProcessAdapter()) {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project' }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter })
+
+    const session = await engine.spawnSession('project-1')
+
+    return { engine, session, processAdapter }
+  }
+
+  it('sends a stop signal to the session process via the Process adapter', async () => {
+    const { engine, session, processAdapter } = await spawnRunningSession()
+
+    await engine.stopSession(session.id)
+
+    expect(processAdapter.stoppedPids).toEqual([session.pid])
+  })
+
+  it('updates the session status to stopped', async () => {
+    const { engine, session } = await spawnRunningSession()
+
+    const stopped = await engine.stopSession(session.id)
+
+    expect(stopped).toMatchObject({ id: session.id, status: 'stopped' })
+  })
+
+  it('persists the stopped status so it is reflected by listSessions', async () => {
+    const { engine, session } = await spawnRunningSession()
+
+    await engine.stopSession(session.id)
+
+    const sessions = await engine.listSessions()
+    expect(sessions).toEqual([expect.objectContaining({ id: session.id, status: 'stopped' })])
+  })
+
+  it('rejects when the session id is unknown', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter })
+
+    await expect(engine.stopSession('missing')).rejects.toThrow('Unknown session: missing')
+  })
+
+  it('does not affect other sessions', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project' }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter })
+
+    const first = await engine.spawnSession('project-1')
+    const second = await engine.spawnSession('project-1')
+
+    await engine.stopSession(first.id)
+
+    const sessions = await engine.listSessions()
+    expect(sessions).toEqual([
+      expect.objectContaining({ id: first.id, status: 'stopped' }),
+      expect.objectContaining({ id: second.id, status: 'running' })
+    ])
+  })
 })

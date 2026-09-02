@@ -21,6 +21,7 @@ export interface ProcessInfo {
 
 export interface ProcessAdapter {
   spawnClaude(cwd: string): Promise<ProcessInfo>
+  stop(pid: number): Promise<void>
   isAlive(pid: number): boolean
   exitCode(pid: number): number | null
 }
