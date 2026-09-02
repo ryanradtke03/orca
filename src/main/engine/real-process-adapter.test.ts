@@ -86,6 +86,52 @@ describe('createRealProcessAdapter', () => {
     await expect(adapter.stop(pid)).resolves.toBeUndefined()
   })
 
+  it('reports no pending prompt while the process has only printed plain output', async () => {
+    const adapter = createRealProcessAdapter('node', [
+      '-e',
+      "process.stdout.write('Reading files...\\n'); setTimeout(() => {}, 5000)"
+    ])
+
+    const { pid } = await adapter.spawnClaude(dir)
+
+    await waitUntil(() => adapter.isAlive(pid))
+    expect(adapter.pendingPrompt(pid)).toBeNull()
+  })
+
+  it('detects a permission prompt once the process prints one to stdout', async () => {
+    const script = [
+      "process.stdout.write('Do you want to proceed?\\n\\u276f 1. Yes\\n  2. No\\n')",
+      'setTimeout(() => {}, 5000)'
+    ].join('; ')
+    const adapter = createRealProcessAdapter('node', ['-e', script])
+
+    const { pid } = await adapter.spawnClaude(dir)
+
+    await waitUntil(() => adapter.pendingPrompt(pid) !== null)
+    expect(adapter.pendingPrompt(pid)).toEqual({
+      type: 'permission',
+      text: expect.stringContaining('Do you want to proceed?')
+    })
+  })
+
+  it('sends a response to the process stdin and clears the pending prompt', async () => {
+    const responseMarker = join(dir, 'response.txt')
+    const script = [
+      "process.stdout.write('Do you want to proceed?\\n\\u276f 1. Yes\\n  2. No\\n')",
+      `process.stdin.on('data', (d) => { require('fs').writeFileSync(${JSON.stringify(responseMarker)}, d.toString()); process.exit(0) })`
+    ].join('; ')
+    const adapter = createRealProcessAdapter('node', ['-e', script])
+
+    const { pid } = await adapter.spawnClaude(dir)
+    await waitUntil(() => adapter.pendingPrompt(pid) !== null)
+
+    await adapter.respond(pid, 'yes')
+
+    await waitUntil(() => existsSync(responseMarker))
+    expect(await readFile(responseMarker, 'utf-8')).toBe('yes\n')
+    expect(adapter.pendingPrompt(pid)).toBeNull()
+  })
+
   it('rejects when the command cannot be spawned', async () => {
     const adapter = createRealProcessAdapter('orca-nonexistent-command-xyz')
 

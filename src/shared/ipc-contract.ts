@@ -18,6 +18,13 @@ export type SessionStatus =
   | 'errored'
   | 'stopped'
 
+export type PendingPromptType = 'permission' | 'input'
+
+export interface PendingPrompt {
+  type: PendingPromptType
+  text: string
+}
+
 export interface Session {
   id: string
   projectId: string
@@ -25,6 +32,7 @@ export interface Session {
   branch: string
   pid: number
   status: SessionStatus
+  pendingPrompt?: PendingPrompt
 }
 
 export const IPC_CHANNELS = {
@@ -34,7 +42,8 @@ export const IPC_CHANNELS = {
   spawnSession: 'session:spawn',
   listSessions: 'session:list',
   refreshSessionStatuses: 'session:refresh-statuses',
-  stopSession: 'session:stop'
+  stopSession: 'session:stop',
+  respondToPrompt: 'session:respond-to-prompt'
 } as const
 
 export interface OrcaApi {
@@ -45,4 +54,5 @@ export interface OrcaApi {
   listSessions(): Promise<Session[]>
   refreshSessionStatuses(): Promise<Session[]>
   stopSession(sessionId: string): Promise<Session>
+  respondToPrompt(sessionId: string, response: string): Promise<Session>
 }

@@ -1,4 +1,4 @@
-import type { Project, Session } from '../../shared/ipc-contract'
+import type { PendingPrompt, Project, Session } from '../../shared/ipc-contract'
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 2000
 
@@ -51,6 +51,10 @@ function renderSessionList(sessions: Session[]): HTMLUListElement {
     statusBadge.textContent = session.status
     li.appendChild(statusBadge)
 
+    if (session.pendingPrompt) {
+      li.appendChild(renderPendingPrompt(session.pendingPrompt))
+    }
+
     if (STOPPABLE_STATUSES.has(session.status)) {
       const stopButton = document.createElement('button')
       stopButton.type = 'button'
@@ -64,6 +68,24 @@ function renderSessionList(sessions: Session[]): HTMLUListElement {
   }
 
   return ul
+}
+
+function renderPendingPrompt(prompt: PendingPrompt): HTMLElement {
+  const wrapper = document.createElement('div')
+  wrapper.className = 'pending-prompt'
+  wrapper.dataset.promptType = prompt.type
+
+  const label = document.createElement('span')
+  label.className = 'pending-prompt-label'
+  label.textContent = prompt.type === 'permission' ? 'Waiting on permission' : 'Waiting on input'
+  wrapper.appendChild(label)
+
+  const text = document.createElement('pre')
+  text.className = 'pending-prompt-text'
+  text.textContent = prompt.text
+  wrapper.appendChild(text)
+
+  return wrapper
 }
 
 function renderProjectList(projects: Project[], sessions: Session[]): void {
@@ -145,6 +167,12 @@ function updateSessionRows(sessions: Session[]): void {
     if (badge) {
       badge.dataset.status = session.status
       badge.textContent = session.status
+    }
+
+    const existingPrompt = li.querySelector<HTMLElement>('.pending-prompt')
+    existingPrompt?.remove()
+    if (session.pendingPrompt) {
+      badge?.after(renderPendingPrompt(session.pendingPrompt))
     }
 
     const existingStopButton = li.querySelector<HTMLButtonElement>('.stop-session-button')

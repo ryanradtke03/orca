@@ -285,6 +285,17 @@ describe('Engine.stopSession', () => {
     expect(sessions).toEqual([expect.objectContaining({ id: session.id, status: 'stopped' })])
   })
 
+  it('clears a pending prompt when stopping a session that was waiting on one', async () => {
+    const processAdapter = createFakeProcessAdapter()
+    const { engine, session } = await spawnRunningSession(processAdapter)
+    processAdapter.simulatePrompt(session.pid, { type: 'permission', text: 'Run npm install?' })
+    await engine.refreshSessionStatuses()
+
+    const stopped = await engine.stopSession(session.id)
+
+    expect(stopped.pendingPrompt).toBeUndefined()
+  })
+
   it('rejects when the session id is unknown', async () => {
     const persistence = createFakePersistenceAdapter()
     const git = createFakeGitAdapter()
@@ -427,5 +438,152 @@ describe('Engine.refreshSessionStatuses', () => {
 
     expect(sessions.find((s) => s.id === first.id)?.status).toBe('done')
     expect(sessions.find((s) => s.id === second.id)?.status).toBe('running')
+  })
+
+  it('transitions a session to waiting-on-permission and fires a notification when the process pauses on a permission prompt', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
+    const [session] = await engine.refreshSessionStatuses()
+
+    expect(session.status).toBe('waiting-on-permission')
+    expect(session.pendingPrompt).toEqual({ type: 'permission', text: 'Run npm install?' })
+    expect(notification.notifications).toEqual([expect.objectContaining({ urgency: 'critical' })])
+  })
+
+  it('transitions a session to waiting-on-input and fires a notification when the process pauses on a clarifying question', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'input', text: 'Which branch?' })
+    const [session] = await engine.refreshSessionStatuses()
+
+    expect(session.status).toBe('waiting-on-input')
+    expect(session.pendingPrompt).toEqual({ type: 'input', text: 'Which branch?' })
+    expect(notification.notifications).toEqual([expect.objectContaining({ urgency: 'critical' })])
+  })
+
+  it('does not re-fire a notification on repeated refreshes while the same prompt is still pending', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
+
+    await engine.refreshSessionStatuses()
+    await engine.refreshSessionStatuses()
+
+    expect(notification.notifications).toHaveLength(1)
+  })
+
+  it('fires a fresh notification when a new prompt replaces an already-answered one', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
+    await engine.refreshSessionStatuses()
+
+    processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm test?' })
+    const [session] = await engine.refreshSessionStatuses()
+
+    expect(session.pendingPrompt).toEqual({ type: 'permission', text: 'Run npm test?' })
+    expect(notification.notifications).toHaveLength(2)
+  })
+
+  it('returns a waiting session to running once the process no longer reports a pending prompt', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
+    await engine.refreshSessionStatuses()
+
+    await processAdapter.respond(spawned.pid, 'yes')
+    const [session] = await engine.refreshSessionStatuses()
+
+    expect(session.status).toBe('running')
+    expect(session.pendingPrompt).toBeUndefined()
+  })
+})
+
+describe('Engine.respondToPrompt', () => {
+  const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project' }]
+
+  it('forwards the response to the Process adapter for the session', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
+    await engine.refreshSessionStatuses()
+
+    await engine.respondToPrompt(spawned.id, 'yes')
+
+    expect(processAdapter.responses).toEqual([{ pid: spawned.pid, text: 'yes' }])
+  })
+
+  it('transitions the session back to running and clears the pending prompt', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
+    await engine.refreshSessionStatuses()
+
+    const updated = await engine.respondToPrompt(spawned.id, 'yes')
+
+    expect(updated.status).toBe('running')
+    expect(updated.pendingPrompt).toBeUndefined()
+  })
+
+  it('rejects when the session id is unknown', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    await expect(engine.respondToPrompt('missing', 'yes')).rejects.toThrow(
+      'Unknown session: missing'
+    )
+  })
+
+  it('rejects when the session has no pending prompt', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    const spawned = await engine.spawnSession('project-1')
+
+    await expect(engine.respondToPrompt(spawned.id, 'yes')).rejects.toThrow(
+      `Session has no pending prompt: ${spawned.id}`
+    )
   })
 })
