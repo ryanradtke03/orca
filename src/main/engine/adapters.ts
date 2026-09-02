@@ -1,4 +1,6 @@
-import type { Project } from '../../shared/ipc-contract'
+import type { PendingPrompt, Project } from '../../shared/ipc-contract'
+
+export type { PendingPrompt, PendingPromptType } from '../../shared/ipc-contract'
 
 export interface PersistenceAdapter {
   loadSessionCount(): Promise<number>
@@ -24,6 +26,8 @@ export interface ProcessAdapter {
   stop(pid: number): Promise<void>
   isAlive(pid: number): boolean
   exitCode(pid: number): number | null
+  pendingPrompt(pid: number): PendingPrompt | null
+  respond(pid: number, response: string): Promise<void>
 }
 
 export type NotificationUrgency = 'critical' | 'low'

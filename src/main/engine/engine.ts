@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
-import type { PingResult, Project, Session } from '../../shared/ipc-contract'
+import type { PingResult, Project, Session, SessionStatus } from '../../shared/ipc-contract'
 import type { EngineAdapters, WorktreeInfo } from './adapters'
 
 export interface Engine {
@@ -12,7 +12,16 @@ export interface Engine {
   listSessions(): Promise<Session[]>
   refreshSessionStatuses(): Promise<Session[]>
   stopSession(sessionId: string): Promise<Session>
+  respondToPrompt(sessionId: string, response: string): Promise<Session>
 }
+
+// Sessions whose process is still expected to be running; refreshSessionStatuses
+// polls the Process adapter for exactly these.
+const ACTIVE_STATUSES: ReadonlySet<Session['status']> = new Set([
+  'running',
+  'waiting-on-permission',
+  'waiting-on-input'
+])
 
 export function createEngine(adapters: EngineAdapters): Engine {
   let projects: Project[] | undefined
@@ -69,28 +78,66 @@ export function createEngine(adapters: EngineAdapters): Engine {
 
   function refreshSessionStatuses(): Promise<Session[]> {
     sessions = sessions.map((session) => {
-      if (session.status !== 'running') return session
-      if (adapters.process.isAlive(session.pid)) return session
+      if (!ACTIVE_STATUSES.has(session.status)) return session
 
-      const exitCode = adapters.process.exitCode(session.pid)
-      if (exitCode === 0) {
+      if (!adapters.process.isAlive(session.pid)) {
+        const exitCode = adapters.process.exitCode(session.pid)
+        if (exitCode === 0) {
+          adapters.notification.notify({
+            title: 'Session finished',
+            body: `${session.branch} finished successfully.`,
+            urgency: 'low'
+          })
+          return { ...session, status: 'done', pendingPrompt: undefined }
+        }
+
         adapters.notification.notify({
-          title: 'Session finished',
-          body: `${session.branch} finished successfully.`,
-          urgency: 'low'
+          title: 'Session errored',
+          body: `${session.branch} exited unexpectedly.`,
+          urgency: 'critical'
         })
-        return { ...session, status: 'done' }
+        return { ...session, status: 'errored', pendingPrompt: undefined }
       }
 
+      const prompt = adapters.process.pendingPrompt(session.pid)
+      if (!prompt) {
+        if (session.pendingPrompt) {
+          return { ...session, status: 'running', pendingPrompt: undefined }
+        }
+        return session
+      }
+
+      const status: SessionStatus =
+        prompt.type === 'permission' ? 'waiting-on-permission' : 'waiting-on-input'
+      const alreadyShown =
+        session.status === status && session.pendingPrompt?.text === prompt.text
+      if (alreadyShown) return session
+
       adapters.notification.notify({
-        title: 'Session errored',
-        body: `${session.branch} exited unexpectedly.`,
+        title: prompt.type === 'permission' ? 'Session needs permission' : 'Session needs input',
+        body: `${session.branch} is waiting on you.`,
         urgency: 'critical'
       })
-      return { ...session, status: 'errored' }
+      return { ...session, status, pendingPrompt: prompt }
     })
 
     return Promise.resolve(sessions)
+  }
+
+  async function respondToPrompt(sessionId: string, response: string): Promise<Session> {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+    if (!session.pendingPrompt) {
+      throw new Error(`Session has no pending prompt: ${sessionId}`)
+    }
+
+    await adapters.process.respond(session.pid, response)
+
+    const updated: Session = { ...session, status: 'running', pendingPrompt: undefined }
+    sessions = sessions.map((candidate) => (candidate.id === sessionId ? updated : candidate))
+    return updated
   }
 
   async function stopSession(sessionId: string): Promise<Session> {
@@ -101,7 +148,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
 
     await adapters.process.stop(session.pid)
 
-    const stopped: Session = { ...session, status: 'stopped' }
+    const stopped: Session = { ...session, status: 'stopped', pendingPrompt: undefined }
     sessions = sessions.map((candidate) => (candidate.id === sessionId ? stopped : candidate))
 
     return stopped
@@ -124,6 +171,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
       return sessions
     },
     refreshSessionStatuses,
-    stopSession
+    stopSession,
+    respondToPrompt
   }
 }
