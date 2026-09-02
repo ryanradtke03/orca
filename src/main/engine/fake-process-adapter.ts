@@ -1,7 +1,7 @@
 import type { ProcessAdapter, ProcessInfo } from './adapters'
 
 export interface FakeProcessAdapter extends ProcessAdapter {
-  simulateExit(pid: number, code: number): void
+  simulateExit(pid: number, code: number | null): void
   spawnedCwds: string[]
   stoppedPids: number[]
 }

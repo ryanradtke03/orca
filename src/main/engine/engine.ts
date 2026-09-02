@@ -10,6 +10,7 @@ export interface Engine {
   createWorktree(projectPath: string): Promise<WorktreeInfo>
   spawnSession(projectId: string): Promise<Session>
   listSessions(): Promise<Session[]>
+  refreshSessionStatuses(): Promise<Session[]>
   stopSession(sessionId: string): Promise<Session>
 }
 
@@ -66,6 +67,32 @@ export function createEngine(adapters: EngineAdapters): Engine {
     return session
   }
 
+  function refreshSessionStatuses(): Promise<Session[]> {
+    sessions = sessions.map((session) => {
+      if (session.status !== 'running') return session
+      if (adapters.process.isAlive(session.pid)) return session
+
+      const exitCode = adapters.process.exitCode(session.pid)
+      if (exitCode === 0) {
+        adapters.notification.notify({
+          title: 'Session finished',
+          body: `${session.branch} finished successfully.`,
+          urgency: 'low'
+        })
+        return { ...session, status: 'done' }
+      }
+
+      adapters.notification.notify({
+        title: 'Session errored',
+        body: `${session.branch} exited unexpectedly.`,
+        urgency: 'critical'
+      })
+      return { ...session, status: 'errored' }
+    })
+
+    return Promise.resolve(sessions)
+  }
+
   async function stopSession(sessionId: string): Promise<Session> {
     const session = sessions.find((candidate) => candidate.id === sessionId)
     if (!session) {
@@ -96,6 +123,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     async listSessions() {
       return sessions
     },
+    refreshSessionStatuses,
     stopSession
   }
 }

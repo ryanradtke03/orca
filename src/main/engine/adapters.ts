@@ -26,8 +26,21 @@ export interface ProcessAdapter {
   exitCode(pid: number): number | null
 }
 
+export type NotificationUrgency = 'critical' | 'low'
+
+export interface Notification {
+  title: string
+  body: string
+  urgency: NotificationUrgency
+}
+
+export interface NotificationAdapter {
+  notify(notification: Notification): void
+}
+
 export interface EngineAdapters {
   persistence: PersistenceAdapter
   git: GitAdapter
   process: ProcessAdapter
+  notification: NotificationAdapter
 }
