@@ -18,4 +18,14 @@ export function registerIpcHandlers(engine: Engine): void {
 
     return engine.addProject(result.filePaths[0])
   })
+
+  ipcMain.handle(IPC_CHANNELS.spawnSession, (_event, projectId: string) =>
+    engine.spawnSession(projectId)
+  )
+
+  ipcMain.handle(IPC_CHANNELS.listSessions, () => engine.listSessions())
+
+  ipcMain.handle(IPC_CHANNELS.stopSession, (_event, sessionId: string) =>
+    engine.stopSession(sessionId)
+  )
 }

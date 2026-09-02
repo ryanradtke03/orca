@@ -9,14 +9,38 @@ export interface Project {
   name: string
 }
 
+export type SessionStatus =
+  | 'running'
+  | 'waiting-on-permission'
+  | 'waiting-on-input'
+  | 'idle'
+  | 'done'
+  | 'errored'
+  | 'stopped'
+
+export interface Session {
+  id: string
+  projectId: string
+  worktreePath: string
+  branch: string
+  pid: number
+  status: SessionStatus
+}
+
 export const IPC_CHANNELS = {
   ping: 'engine:ping',
   listProjects: 'project:list',
-  addProjectViaDialog: 'project:add-via-dialog'
+  addProjectViaDialog: 'project:add-via-dialog',
+  spawnSession: 'session:spawn',
+  listSessions: 'session:list',
+  stopSession: 'session:stop'
 } as const
 
 export interface OrcaApi {
   ping(): Promise<PingResult>
   listProjects(): Promise<Project[]>
   addProjectViaDialog(): Promise<Project | null>
+  spawnSession(projectId: string): Promise<Session>
+  listSessions(): Promise<Session[]>
+  stopSession(sessionId: string): Promise<Session>
 }

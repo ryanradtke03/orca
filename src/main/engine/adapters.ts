@@ -21,6 +21,7 @@ export interface ProcessInfo {
 
 export interface ProcessAdapter {
   spawnClaude(cwd: string): Promise<ProcessInfo>
+  stop(pid: number): Promise<void>
   isAlive(pid: number): boolean
   exitCode(pid: number): number | null
 }
@@ -28,4 +29,5 @@ export interface ProcessAdapter {
 export interface EngineAdapters {
   persistence: PersistenceAdapter
   git: GitAdapter
+  process: ProcessAdapter
 }

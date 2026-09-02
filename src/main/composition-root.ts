@@ -12,5 +12,7 @@ export function createProductionEngine(): Engine {
   const worktreesRootDir = join(app.getPath('userData'), 'worktrees')
   const git = createRealGitAdapter(worktreesRootDir)
 
-  return createEngine({ persistence, git })
+  const claudeProcess = createRealProcessAdapter()
+
+  return createEngine({ persistence, git, process: claudeProcess })
 }

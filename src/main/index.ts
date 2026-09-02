@@ -8,6 +8,7 @@ function createMainWindow(): void {
     width: 900,
     height: 670,
     show: false,
+    icon: join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -25,6 +26,10 @@ function createMainWindow(): void {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    app.dock?.setIcon(join(__dirname, '../../resources/icon.png'))
+  }
+
   const engine = createProductionEngine()
   registerIpcHandlers(engine)
 
