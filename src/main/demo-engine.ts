@@ -22,6 +22,15 @@ const PULL_REQUEST_PROJECT_ID = 'demo-project-pull-request'
 const DISCOVERED_PROJECT_PATH = '/demo/orca-scratch'
 const DISCOVERED_PID = 9999
 
+// Path/pid for the #10 "adoptable" session - deliberately absent from
+// scan() (see simulateManualOnlySession below), the same way a session
+// Discovery's periodic scan can't find on its own would be. To see the
+// Adopt flow, use the sidebar's "Adopt session…" form with this PID and
+// directory - a new Project/Session for it appears the same way a real
+// Adopt would resolve one.
+const ADOPTABLE_PROJECT_PATH = '/demo/orca-unclaimed'
+const ADOPTABLE_PID = 8888
+
 const SMALL_DIFF: FileDiff[] = [
   {
     path: 'src/index.ts',
@@ -196,6 +205,18 @@ export function createDemoEngine(): Engine {
   })
   processAdapter.registerAlive(DISCOVERED_PID)
   git.simulateDiff(DISCOVERED_PROJECT_PATH, SMALL_DIFF)
+
+  // Only resolveManual() can find this one - scan() never reports it, so it
+  // stays absent from the sidebar until the user adopts it themselves.
+  discovery.simulateManualOnlySession({
+    pid: ADOPTABLE_PID,
+    cwd: ADOPTABLE_PROJECT_PATH,
+    projectPath: ADOPTABLE_PROJECT_PATH,
+    branch: 'manual/fix-flaky-test',
+    baseRef: 'base-manual',
+    status: 'idle'
+  })
+  git.simulateDiff(ADOPTABLE_PROJECT_PATH, SMALL_DIFF)
 
   const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
   void seedDemoData(engine, git, processAdapter, github).catch((error) => {

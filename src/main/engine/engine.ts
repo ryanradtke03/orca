@@ -465,6 +465,22 @@ export function createEngine(adapters: EngineAdapters): Engine {
         const newSessions: Session[] = []
 
         for (const entry of untracked) {
+          // Only an active entry needs to be pollable going forward -
+          // refreshSessionStatuses never calls isAlive for a terminal one
+          // (see checkPullRequestMerged), and the real Process adapter can't
+          // always confirm a session that's already finished is still
+          // listed, so skipping this for those avoids dropping an otherwise
+          // valid discovered entry over a registration failure that doesn't
+          // matter for it.
+          if (ACTIVE_STATUSES.has(entry.status)) {
+            try {
+              await adapters.process.registerAlive(entry.pid)
+            } catch (error) {
+              console.error(`Failed to register discovered session pid ${entry.pid} as alive:`, error)
+              continue
+            }
+          }
+
           const { project, projects: nextProjects } = findOrCreateProject(updatedProjects, entry.projectPath)
           updatedProjects = nextProjects
 
@@ -506,6 +522,14 @@ export function createEngine(adapters: EngineAdapters): Engine {
       const resolved = await adapters.discovery.resolveManual(pid, directory)
       if (!resolved) {
         throw new Error(`No running Claude Code session found for pid ${pid} in ${directory}`)
+      }
+
+      // Makes the adopted pid pollable by refreshSessionStatuses going
+      // forward, exactly like a spawned session's - skipped for an
+      // already-terminal one, which refreshSessionStatuses never calls
+      // isAlive for anyway (see checkPullRequestMerged).
+      if (ACTIVE_STATUSES.has(resolved.status)) {
+        await adapters.process.registerAlive(resolved.pid)
       }
 
       return serializeSessionWrite(async () => {

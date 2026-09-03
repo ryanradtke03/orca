@@ -160,6 +160,21 @@ export function createRealDiscoveryAdapter(
   transcriptsRootDir = DEFAULT_TRANSCRIPTS_ROOT_DIR,
   listAgentStatuses: ListAgentStatuses = createAgentStatusLister(command)
 ): DiscoveryAdapter {
+  // Shared by scan() and resolveManual() - both resolve the same shape
+  // (branch/baseRef/status/pendingPrompt) for an entry already known to have
+  // a pid and id, just starting from a different cwd source (a transcript
+  // for scan(), the caller-supplied directory for resolveManual()).
+  async function resolveSessionDetails(
+    entry: AgentStatusEntry & { id: string },
+    cwd: string
+  ): Promise<Pick<DiscoveredSession, 'branch' | 'baseRef' | 'status' | 'pendingPrompt'>> {
+    const [branch, baseRef] = await Promise.all([resolveBranch(cwd), resolveBaseRef(cwd)])
+    const { status, promptType } = classify(entry)
+    const pendingPrompt = promptType ? await resolvePendingPrompt(command, entry.id, promptType) : undefined
+
+    return { branch, baseRef, status, pendingPrompt }
+  }
+
   return {
     async scan(): Promise<DiscoveredSession[]> {
       let statuses: AgentStatusEntry[]
@@ -188,13 +203,8 @@ export function createRealDiscoveryAdapter(
           const projectPath = await resolveProjectPath(cwd)
           if (!projectPath) return null
 
-          const [branch, baseRef] = await Promise.all([resolveBranch(cwd), resolveBaseRef(cwd)])
-          const { status, promptType } = classify(entry)
-          const pendingPrompt = promptType
-            ? await resolvePendingPrompt(command, entry.id, promptType)
-            : undefined
-
-          return { pid: entry.pid, cwd, projectPath, branch, baseRef, status, pendingPrompt }
+          const details = await resolveSessionDetails({ ...entry, id: entry.id }, cwd)
+          return { pid: entry.pid, cwd, projectPath, ...details }
         })
       )
 
@@ -215,13 +225,8 @@ export function createRealDiscoveryAdapter(
       const projectPath = await resolveProjectPath(directory)
       if (!projectPath) return null
 
-      const [branch, baseRef] = await Promise.all([resolveBranch(directory), resolveBaseRef(directory)])
-      const { status, promptType } = classify(entry)
-      const pendingPrompt = promptType
-        ? await resolvePendingPrompt(command, entry.id, promptType)
-        : undefined
-
-      return { pid, cwd: directory, projectPath, branch, baseRef, status, pendingPrompt }
+      const details = await resolveSessionDetails({ ...entry, id: entry.id }, directory)
+      return { pid, cwd: directory, projectPath, ...details }
     }
   }
 }

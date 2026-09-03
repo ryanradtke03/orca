@@ -1675,6 +1675,30 @@ describe('Engine.discoverSessions', () => {
     expect(session.pendingPrompt).toEqual({ type: 'permission', text: 'Run npm install?' })
   })
 
+  it('registers a newly discovered active session with the Process adapter, so a later refresh does not mark it errored', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'work-in-progress',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await engine.discoverSessions()
+    const [session] = await engine.refreshSessionStatuses()
+
+    expect(session.status).toBe('running')
+  })
+
   it('accumulates sessions discovered together with sessions already tracked', async () => {
     const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
     const persistence = createFakePersistenceAdapter({ projects: seeded })
@@ -1860,6 +1884,29 @@ describe('Engine.adoptSession', () => {
 
     expect(session.status).toBe('waiting-on-permission')
     expect(session.pendingPrompt).toEqual({ type: 'permission', text: 'Run npm install?' })
+  })
+
+  it('registers a newly adopted active session with the Process adapter, so a later refresh does not mark it errored', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateManualOnlySession({
+      pid: 5150,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'manual-branch',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await engine.adoptSession(5150, '/tmp/my-project')
+    const [session] = await engine.refreshSessionStatuses()
+
+    expect(session.status).toBe('running')
   })
 
   it('rejects adopting a pid Discovery cannot resolve', async () => {

@@ -68,6 +68,12 @@ export interface ProcessAdapter {
   exitCode(pid: number): number | null
   pendingPrompt(pid: number): PendingPrompt | null
   respond(pid: number, response: string): Promise<void>
+  // Registers a pid this adapter didn't spawn itself - found running
+  // independently via Discovery or a manual Adopt - so isAlive/exitCode/
+  // pendingPrompt track it from here on exactly like a spawned session's.
+  // Rejects if pid doesn't correspond to a session this adapter can confirm
+  // is actually running.
+  registerAlive(pid: number): Promise<void>
 }
 
 export type NotificationUrgency = 'critical' | 'low'

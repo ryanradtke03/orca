@@ -3,11 +3,6 @@ import type { PendingPrompt, ProcessAdapter, ProcessInfo } from './adapters'
 export interface FakeProcessAdapter extends ProcessAdapter {
   simulateExit(pid: number, code: number | null): void
   simulatePrompt(pid: number, prompt: PendingPrompt): void
-  // Registers a pid as alive without going through spawnClaude - for a pid
-  // this adapter never assigned itself (e.g. one a fake Discovery adapter
-  // reports), so isAlive/exitCode/pendingPrompt behave for it exactly like
-  // one Discovery found still running.
-  registerAlive(pid: number): void
   spawnedCwds: string[]
   stoppedPids: number[]
   responses: { pid: number; text: string }[]
@@ -63,7 +58,7 @@ export function createFakeProcessAdapter(seed: { pid?: number } = {}): FakeProce
       process.pendingPrompt = prompt
     },
 
-    registerAlive(pid: number): void {
+    async registerAlive(pid: number): Promise<void> {
       processes.set(pid, { alive: true, exitCode: null, pendingPrompt: null })
     },
 

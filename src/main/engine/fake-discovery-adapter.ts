@@ -37,9 +37,12 @@ export function createFakeDiscoveryAdapter(
     },
 
     async resolveManual(pid: number, directory: string): Promise<DiscoveredSession | null> {
-      // The caller-supplied directory is authoritative (mirrors the real
-      // adapter, which resolves projectPath/branch/baseRef from it directly)
-      // - only the pid is used to find a matching running session.
+      // Only the pid is used to find a matching seeded session - the
+      // caller-supplied directory becomes the resolved cwd (mirroring the
+      // real adapter, which treats it as authoritative), but projectPath/
+      // branch/baseRef are whatever the test seeded, since a fake can't
+      // derive them via real git commands the way the real adapter does.
+      // Tests wanting those to reflect `directory` should seed them that way.
       const match = sessions.find((session) => session.pid === pid) ??
         manualOnlySessions.find((session) => session.pid === pid)
       if (!match) return null

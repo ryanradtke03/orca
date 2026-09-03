@@ -389,9 +389,9 @@ function setStatus(message: string): void {
   if (status) status.textContent = message
 }
 
-// Preserves whatever the user is mid-typing into a reply or Adopt field
-// across a re-render, since a full rebuild would otherwise replace the input
-// under their cursor and silently drop the draft.
+// Preserves whatever the user is mid-typing into a reply field across a
+// re-render, since a full rebuild would otherwise replace the input under
+// their cursor and silently drop the draft.
 interface FieldDraft {
   selector: string
   value: string
@@ -400,19 +400,13 @@ interface FieldDraft {
 
 function captureFieldDraft(): FieldDraft | null {
   const active = document.activeElement
-  if (!(active instanceof HTMLInputElement)) return null
-
-  if (active.classList.contains('reply-input') && active.dataset.sessionId) {
-    return {
-      selector: `.reply-input[data-session-id="${active.dataset.sessionId}"]`,
-      value: active.value,
-      selectionStart: active.selectionStart
-    }
+  if (!(active instanceof HTMLInputElement) || !active.classList.contains('reply-input')) return null
+  if (!active.dataset.sessionId) return null
+  return {
+    selector: `.reply-input[data-session-id="${active.dataset.sessionId}"]`,
+    value: active.value,
+    selectionStart: active.selectionStart
   }
-  if (active.id === 'adopt-pid-input' || active.id === 'adopt-directory-input') {
-    return { selector: `#${active.id}`, value: active.value, selectionStart: active.selectionStart }
-  }
-  return null
 }
 
 function restoreFieldDraft(draft: FieldDraft | null): void {
@@ -422,6 +416,49 @@ function restoreFieldDraft(draft: FieldDraft | null): void {
   input.value = draft.value
   input.focus()
   if (draft.selectionStart !== null) input.setSelectionRange(draft.selectionStart, draft.selectionStart)
+}
+
+// Preserves both Adopt form fields (not just the focused one) across a
+// re-render - a single-input draft would silently drop whichever field
+// isn't currently focused every time the 2s status poll rebuilds the sidebar.
+interface AdoptFormDraft {
+  pid: string
+  directory: string
+  focusedId: 'adopt-pid-input' | 'adopt-directory-input' | null
+  selectionStart: number | null
+}
+
+function captureAdoptFormDraft(): AdoptFormDraft | null {
+  const pidInput = document.querySelector<HTMLInputElement>('#adopt-pid-input')
+  const directoryInput = document.querySelector<HTMLInputElement>('#adopt-directory-input')
+  if (!pidInput || !directoryInput) return null
+
+  const active = document.activeElement
+  const focusedId =
+    active instanceof HTMLInputElement && (active.id === 'adopt-pid-input' || active.id === 'adopt-directory-input')
+      ? active.id
+      : null
+
+  return {
+    pid: pidInput.value,
+    directory: directoryInput.value,
+    focusedId,
+    selectionStart: focusedId && active instanceof HTMLInputElement ? active.selectionStart : null
+  }
+}
+
+function restoreAdoptFormDraft(draft: AdoptFormDraft | null): void {
+  if (!draft) return
+  const pidInput = document.querySelector<HTMLInputElement>('#adopt-pid-input')
+  const directoryInput = document.querySelector<HTMLInputElement>('#adopt-directory-input')
+  if (pidInput) pidInput.value = draft.pid
+  if (directoryInput) directoryInput.value = draft.directory
+
+  if (!draft.focusedId) return
+  const focused = document.querySelector<HTMLInputElement>(`#${draft.focusedId}`)
+  if (!focused) return
+  focused.focus()
+  if (draft.selectionStart !== null) focused.setSelectionRange(draft.selectionStart, draft.selectionStart)
 }
 
 // Preserves how far the user has scrolled the session list / project nav
@@ -449,6 +486,7 @@ function restoreScrollPositions(positions: ScrollPositions): void {
 function renderDashboard(projects: Project[], sessions: Session[]): void {
   if (!app) return
   const draft = captureFieldDraft()
+  const adoptDraft = captureAdoptFormDraft()
   const scrollPositions = captureScrollPositions()
 
   const groups = groupSessionsByProject(projects, sessions)
@@ -459,6 +497,7 @@ function renderDashboard(projects: Project[], sessions: Session[]): void {
   app.append(projects.length === 0 ? renderEmptyState() : renderMain(sessions, groups, attention))
 
   restoreFieldDraft(draft)
+  restoreAdoptFormDraft(adoptDraft)
   restoreScrollPositions(scrollPositions)
 }
 
