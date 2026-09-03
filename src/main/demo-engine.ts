@@ -1,5 +1,6 @@
 import type { FileDiff } from '../shared/ipc-contract'
 import { createEngine, type Engine } from './engine/engine'
+import { createFakeDiscoveryAdapter } from './engine/fake-discovery-adapter'
 import { createFakeGitAdapter, type FakeGitAdapter } from './engine/fake-git-adapter'
 import { createFakeGitHubAdapter } from './engine/fake-github-adapter'
 import { createFakeNotificationAdapter } from './engine/fake-notification-adapter'
@@ -130,8 +131,11 @@ export function createDemoEngine(): Engine {
   const processAdapter = createFakeProcessAdapter()
   const notification = createFakeNotificationAdapter()
   const github = createFakeGitHubAdapter()
+  // No externally-started sessions to discover in the demo - it's seeded
+  // entirely through spawnSession below.
+  const discovery = createFakeDiscoveryAdapter()
 
-  const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+  const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
   void seedDemoData(engine, git, processAdapter)
 
   return engine

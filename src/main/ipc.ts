@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
+import { realpath } from 'fs/promises'
 import type { Engine } from './engine/engine'
 import { IPC_CHANNELS, type MergeMode } from '../shared/ipc-contract'
 
@@ -16,7 +17,14 @@ export function registerIpcHandlers(engine: Engine): void {
 
     if (result.canceled || result.filePaths.length === 0) return null
 
-    return engine.addProject(result.filePaths[0])
+    // Resolved the same way Discovery resolves a session's Project path
+    // (`git rev-parse --show-toplevel`, which follows symlinks) - otherwise
+    // a Project added at a symlinked path (e.g. macOS's /tmp) would never
+    // match a later-discovered Session for that same repo, and Discovery
+    // would create a duplicate Project for it instead.
+    const path = await realpath(result.filePaths[0])
+
+    return engine.addProject(path)
   })
 
   ipcMain.handle(IPC_CHANNELS.spawnSession, (_event, projectId: string) =>

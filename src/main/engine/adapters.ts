@@ -1,4 +1,4 @@
-import type { FileDiff, PendingPrompt, Project } from '../../shared/ipc-contract'
+import type { FileDiff, PendingPrompt, Project, SessionStatus } from '../../shared/ipc-contract'
 
 export type {
   FileDiff,
@@ -6,7 +6,8 @@ export type {
   MergeMode,
   MergeResult,
   PendingPrompt,
-  PendingPromptType
+  PendingPromptType,
+  SessionStatus
 } from '../../shared/ipc-contract'
 
 export interface PersistenceAdapter {
@@ -74,10 +75,40 @@ export interface NotificationAdapter {
   notify(notification: Notification): void
 }
 
+export interface DiscoveredSession {
+  // Same identity space as ProcessAdapter's pid-keyed methods, so once the
+  // Engine adopts a discovered session it can be polled by
+  // refreshSessionStatuses exactly like a spawned one.
+  pid: number
+  // The directory the session is actually running in - becomes the
+  // Session's worktreePath, whether or not it's an Orca-managed worktree.
+  cwd: string
+  // The repo root cwd sits inside. Used to match an existing Project (by
+  // path) or create a new one - never the worktree/cwd itself, since a
+  // spawned Session's cwd is a worktree path, not the Project's own path.
+  projectPath: string
+  branch: string
+  // What getDiff should compare cwd's working tree against. For a session
+  // Orca didn't spawn there's no recorded fork point, so an adapter is
+  // expected to make a best-effort choice (e.g. a merge-base with the
+  // Project's default branch).
+  baseRef: string
+  status: SessionStatus
+  pendingPrompt?: PendingPrompt
+}
+
+export interface DiscoveryAdapter {
+  // Lists every Claude Code CLI session currently running, whether Orca
+  // already tracks it or not - the Engine is responsible for filtering out
+  // ones it already knows about (see Engine.discoverSessions).
+  scan(): Promise<DiscoveredSession[]>
+}
+
 export interface EngineAdapters {
   persistence: PersistenceAdapter
   git: GitAdapter
   process: ProcessAdapter
   notification: NotificationAdapter
   github: GitHubAdapter
+  discovery: DiscoveryAdapter
 }

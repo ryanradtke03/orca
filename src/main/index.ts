@@ -5,6 +5,11 @@ import { createDemoEngine } from './demo-engine'
 import { registerIpcHandlers } from './ipc'
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 2000
+// Discovery scans the filesystem (session transcripts) and shells out to the
+// `claude` CLI, so it's meaningfully heavier than a status poll - it runs
+// far less often, on top of the unconditional scan on launch that picks up
+// whatever was already running before Orca (re)started (ADR-0002).
+const SESSION_DISCOVERY_POLL_INTERVAL_MS = 15_000
 
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -47,6 +52,19 @@ app.whenReady().then(() => {
       console.error('Failed to refresh session statuses:', error)
     })
   }, SESSION_STATUS_POLL_INTERVAL_MS)
+
+  // Runs once immediately so Sessions still running from a previous launch
+  // (or started outside Orca before this one even opened) show up without
+  // waiting for the first periodic tick, then keeps scanning periodically
+  // for ones that show up later.
+  engine.discoverSessions().catch((error) => {
+    console.error('Failed to discover sessions:', error)
+  })
+  setInterval(() => {
+    engine.discoverSessions().catch((error) => {
+      console.error('Failed to discover sessions:', error)
+    })
+  }, SESSION_DISCOVERY_POLL_INTERVAL_MS)
 
   createMainWindow()
 
