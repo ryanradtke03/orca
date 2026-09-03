@@ -27,6 +27,10 @@ export interface WorktreeInfo {
 export interface GitAdapter {
   createWorktree(projectPath: string): Promise<WorktreeInfo>
   removeWorktree(projectPath: string, worktreePath: string): Promise<void>
+  // Removes a worktree regardless of uncommitted/untracked changes, for an
+  // explicit user discard - unlike removeWorktree, which git itself refuses
+  // in that situation so unreviewed work isn't lost silently.
+  discardWorktree(projectPath: string, worktreePath: string): Promise<void>
   getDiff(worktreePath: string, baseRef: string): Promise<FileDiff[]>
   // Commits any changes still uncommitted in the worktree (the Diff shows
   // those too, so leaving them behind would merge less than the user
@@ -42,12 +46,15 @@ export interface PullRequestInfo {
   url: string
 }
 
+export type PullRequestStatus = 'open' | 'merged' | 'closed'
+
 export interface GitHubAdapter {
   openPullRequest(params: {
     projectPath: string
     branch: string
     title: string
   }): Promise<PullRequestInfo>
+  getPullRequestStatus(url: string): Promise<PullRequestStatus>
 }
 
 export interface ProcessInfo {

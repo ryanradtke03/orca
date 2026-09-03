@@ -550,7 +550,8 @@ button {
 
 .view-diff-button,
 .stop-session-button,
-.request-merge-button {
+.request-merge-button,
+.discard-worktree-button {
   background: none;
   border: none;
   padding: 0;
@@ -562,12 +563,18 @@ button {
   color: var(--text-primary);
 }
 
-.stop-session-button:hover {
+.stop-session-button:hover,
+.discard-worktree-button:hover {
   color: var(--danger);
 }
 
 .request-merge-button:hover {
   color: var(--accent);
+}
+
+.worktree-removed-note {
+  font: 400 11px/1 var(--font-ui);
+  color: var(--text-faint);
 }
 
 /* Empty state */

@@ -19,6 +19,12 @@ export function createRealGitHubAdapter(): GitHubAdapter {
       const lines = stdout.trim().split('\n').filter(Boolean)
       const url = lines[lines.length - 1] ?? ''
       return { url }
+    },
+
+    async getPullRequestStatus(url: string) {
+      const { stdout } = await execFileAsync('gh', ['pr', 'view', url, '--json', 'state'])
+      const { state } = JSON.parse(stdout) as { state: 'OPEN' | 'MERGED' | 'CLOSED' }
+      return state.toLowerCase() as 'open' | 'merged' | 'closed'
     }
   }
 }

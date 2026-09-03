@@ -3,11 +3,13 @@ import type { MergeMode, PendingPrompt, Project, Session, SessionStatus } from '
 import { renderDiffLoadError, renderDiffLoading, renderDiffScreen } from './diff-view'
 import { el } from './dom'
 import {
+  canDiscardWorktree,
+  canRequestMerge,
+  canViewDiff,
   describeMergeMode,
   describeStatus,
   groupSessionsByProject,
   isAttentionStatus,
-  isMergeable,
   isStoppable,
   isTerminalStatus,
   needsAttentionSessions,
@@ -60,13 +62,15 @@ function renderSessionRow(session: Session): HTMLElement {
     textContent: describeStatus(session.status)
   })
   const action = el('div', { className: 'row-action' })
-  const diffButton = el('button', {
-    type: 'button',
-    className: 'view-diff-button',
-    textContent: 'Diff'
-  })
-  diffButton.dataset.sessionId = session.id
-  action.append(diffButton)
+  if (canViewDiff(session)) {
+    const diffButton = el('button', {
+      type: 'button',
+      className: 'view-diff-button',
+      textContent: 'Diff'
+    })
+    diffButton.dataset.sessionId = session.id
+    action.append(diffButton)
+  }
   if (isStoppable(session.status)) {
     const stopButton = el('button', {
       type: 'button',
@@ -76,7 +80,7 @@ function renderSessionRow(session: Session): HTMLElement {
     stopButton.dataset.sessionId = session.id
     action.append(stopButton)
   }
-  if (isMergeable(session.status)) {
+  if (canRequestMerge(session)) {
     const mergeButton = el('button', {
       type: 'button',
       className: 'request-merge-button',
@@ -84,6 +88,18 @@ function renderSessionRow(session: Session): HTMLElement {
     })
     mergeButton.dataset.sessionId = session.id
     action.append(mergeButton)
+  }
+  if (canDiscardWorktree(session)) {
+    const discardButton = el('button', {
+      type: 'button',
+      className: 'discard-worktree-button',
+      textContent: 'Discard'
+    })
+    discardButton.dataset.sessionId = session.id
+    action.append(discardButton)
+  }
+  if (session.worktreeRemoved) {
+    action.append(el('span', { className: 'worktree-removed-note', textContent: 'Worktree removed' }))
   }
 
   row.append(marker, branch, statusLabel, action)
@@ -515,8 +531,25 @@ async function handleRequestMerge(sessionId: string): Promise<void> {
     } else {
       setStatus('Merge mode is Manual — merge the Diff yourself.')
     }
+    await pollSessionStatuses()
   } catch (error) {
     setStatus(`Failed to request merge: ${describeError(error)}`)
+  }
+}
+
+async function handleDiscardWorktree(sessionId: string): Promise<void> {
+  // Discarding permanently throws away whatever unreviewed/unmerged work is
+  // still sitting in the worktree - confirm before doing something the user
+  // can't undo from within Orca.
+  if (!window.confirm('Discard this worktree? Any unmerged changes will be permanently lost.')) {
+    return
+  }
+
+  try {
+    await window.orca.discardWorktree(sessionId)
+    await pollSessionStatuses()
+  } catch (error) {
+    setStatus(`Failed to discard worktree: ${describeError(error)}`)
   }
 }
 
@@ -584,6 +617,12 @@ function handleAppClick(event: Event): void {
   const requestMergeButton = target.closest<HTMLButtonElement>('.request-merge-button')
   if (requestMergeButton?.dataset.sessionId) {
     void handleRequestMerge(requestMergeButton.dataset.sessionId)
+    return
+  }
+
+  const discardWorktreeButton = target.closest<HTMLButtonElement>('.discard-worktree-button')
+  if (discardWorktreeButton?.dataset.sessionId) {
+    void handleDiscardWorktree(discardWorktreeButton.dataset.sessionId)
   }
 }
 

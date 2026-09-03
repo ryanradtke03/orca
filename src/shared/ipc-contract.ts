@@ -43,6 +43,13 @@ export interface Session {
   pid: number
   status: SessionStatus
   pendingPrompt?: PendingPrompt
+  // Set once the Session's worktree has actually been removed from disk -
+  // either merge-mode-integrated cleanup or an explicit user discard. A
+  // Session in this state has no Diff or worktree path left to operate on.
+  worktreeRemoved?: boolean
+  // Set when Merge mode = Pull request has opened a PR for this Session -
+  // refreshSessionStatuses polls it and reclaims the worktree once merged.
+  pullRequestUrl?: string
 }
 
 export type FileDiffStatus = 'added' | 'modified' | 'deleted' | 'renamed'
@@ -66,7 +73,8 @@ export const IPC_CHANNELS = {
   respondToPrompt: 'session:respond-to-prompt',
   getDiff: 'session:get-diff',
   setProjectMergeMode: 'project:set-merge-mode',
-  requestMerge: 'session:request-merge'
+  requestMerge: 'session:request-merge',
+  discardWorktree: 'session:discard-worktree'
 } as const
 
 export interface OrcaApi {
@@ -81,4 +89,5 @@ export interface OrcaApi {
   getDiff(sessionId: string): Promise<FileDiff[]>
   setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
   requestMerge(sessionId: string): Promise<MergeResult>
+  discardWorktree(sessionId: string): Promise<Session>
 }
