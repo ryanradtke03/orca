@@ -14,7 +14,8 @@ const orca: OrcaApi = {
   getDiff: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getDiff, sessionId),
   setProjectMergeMode: (projectId, mergeMode) =>
     ipcRenderer.invoke(IPC_CHANNELS.setProjectMergeMode, projectId, mergeMode),
-  requestMerge: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.requestMerge, sessionId)
+  requestMerge: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.requestMerge, sessionId),
+  discardWorktree: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.discardWorktree, sessionId)
 }
 
 contextBridge.exposeInMainWorld('orca', orca)

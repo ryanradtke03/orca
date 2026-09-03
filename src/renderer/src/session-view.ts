@@ -38,6 +38,25 @@ export function isMergeable(status: SessionStatus): boolean {
   return status === 'done'
 }
 
+// Once a Session's worktree is gone (merge-mode cleanup or an explicit
+// discard), there's no Diff or worktree left for a "Request merge"/"Diff"
+// action to operate on.
+export function canRequestMerge(session: Session): boolean {
+  return isMergeable(session.status) && !session.worktreeRemoved
+}
+
+export function canViewDiff(session: Session): boolean {
+  return !session.worktreeRemoved
+}
+
+// A terminal Session with its worktree still on disk can be explicitly
+// discarded - the only way to reclaim a Manual-mode Session's worktree
+// short of the user merging it themselves, and the only way at all for one
+// that was stopped or errored (Merge mode never applies to those).
+export function canDiscardWorktree(session: Session): boolean {
+  return isTerminalStatus(session.status) && !session.worktreeRemoved
+}
+
 export const MERGE_MODES: MergeMode[] = ['manual', 'local-merge', 'pull-request']
 
 const MERGE_MODE_LABELS: Record<MergeMode, string> = {

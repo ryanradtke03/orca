@@ -54,4 +54,8 @@ export function registerIpcHandlers(engine: Engine): void {
   ipcMain.handle(IPC_CHANNELS.requestMerge, (_event, sessionId: string) =>
     engine.requestMerge(sessionId)
   )
+
+  ipcMain.handle(IPC_CHANNELS.discardWorktree, (_event, sessionId: string) =>
+    engine.discardWorktree(sessionId)
+  )
 }

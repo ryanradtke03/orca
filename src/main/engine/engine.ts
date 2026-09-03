@@ -9,7 +9,7 @@ import type {
   Session,
   SessionStatus
 } from '../../shared/ipc-contract'
-import type { EngineAdapters, WorktreeInfo } from './adapters'
+import type { EngineAdapters, PullRequestStatus, WorktreeInfo } from './adapters'
 
 export interface Engine {
   ping(): Promise<PingResult>
@@ -25,6 +25,7 @@ export interface Engine {
   setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
   requestMerge(sessionId: string): Promise<MergeResult>
   discoverSessions(): Promise<Session[]>
+  discardWorktree(sessionId: string): Promise<Session>
 }
 
 // Sessions whose process is still expected to be running; refreshSessionStatuses
@@ -49,6 +50,14 @@ export function createEngine(adapters: EngineAdapters): Engine {
   let writeQueue: Promise<unknown> = Promise.resolve()
   // Serializes every read-modify-write of `sessions` (spawn/stop/respond/refresh).
   let sessionsQueue: Promise<unknown> = Promise.resolve()
+  // requestMerge/discardWorktree/checkPullRequestMerged all run their (slow,
+  // subprocess-backed) worktree I/O outside sessionsQueue, so unrelated
+  // sessions' status refreshes aren't blocked behind a single merge/discard -
+  // this guards the resource those three actually contend over: a given
+  // Session's own worktree. The check-then-add always happens synchronously
+  // before either function's first `await`, so two calls racing for the same
+  // Session can never both pass it, without needing a queue.
+  const worktreeOpInFlight = new Set<string>()
 
   function serializeSessionWrite<T>(fn: () => Promise<T>): Promise<T> {
     const result = sessionsQueue.then(fn)
@@ -100,6 +109,36 @@ export function createEngine(adapters: EngineAdapters): Engine {
     return result
   }
 
+  // Removes a Session's worktree and logs (rather than throws) on failure -
+  // most commonly git refusing because it still holds uncommitted/untracked
+  // changes, in which case it's left in place rather than losing work. A
+  // genuinely unexpected failure (e.g. the Project directory having moved)
+  // stays visible in the logs instead of silently leaking disk space forever.
+  async function removeWorktreeIfPossible(project: Project, session: Session): Promise<boolean> {
+    try {
+      await adapters.git.removeWorktree(project.path, session.worktreePath)
+      return true
+    } catch (error) {
+      console.error(`Failed to remove worktree for session ${session.id}:`, error)
+      return false
+    }
+  }
+
+  function markWorktreeRemoved(sessionId: string): Promise<Session> {
+    return serializeSessionWrite(async () => {
+      let updated: Session | undefined
+      sessions = sessions.map((candidate) => {
+        if (candidate.id !== sessionId) return candidate
+        updated = { ...candidate, worktreeRemoved: true }
+        return updated
+      })
+      // sessionId is always looked up by the caller first, so it's still
+      // present here - serializeSessionWrite only reorders concurrent
+      // writes, it never drops a session out of the array.
+      return updated as Session
+    })
+  }
+
   async function requestMerge(sessionId: string): Promise<MergeResult> {
     const session = sessions.find((candidate) => candidate.id === sessionId)
     if (!session) {
@@ -110,33 +149,101 @@ export function createEngine(adapters: EngineAdapters): Engine {
       throw new Error(`Session is not finished: ${sessionId}`)
     }
 
-    const existing = await loadProjects()
-    const project = existing.find((candidate) => candidate.id === session.projectId)
-    if (!project) {
-      throw new Error(`Unknown project: ${session.projectId}`)
+    if (session.worktreeRemoved) {
+      throw new Error(`Worktree already removed for session: ${sessionId}`)
     }
 
-    if (project.mergeMode === 'local-merge') {
-      await adapters.git.mergeWorktree({
-        projectPath: project.path,
-        worktreePath: session.worktreePath,
-        branch: session.branch
-      })
-      return { mergeMode: 'local-merge' }
+    // Claimed synchronously, before any `await` below - so a second
+    // concurrent requestMerge/discardWorktree call for the same session
+    // (e.g. a double-clicked button) always observes the claim and is
+    // rejected, instead of both proceeding to merge/remove the same worktree.
+    if (worktreeOpInFlight.has(sessionId)) {
+      throw new Error(`A worktree operation is already in progress for session: ${sessionId}`)
     }
+    worktreeOpInFlight.add(sessionId)
 
-    if (project.mergeMode === 'pull-request') {
-      await adapters.git.pushBranch(session.worktreePath, session.branch)
-      const { url } = await adapters.github.openPullRequest({
-        projectPath: project.path,
-        branch: session.branch,
-        title: session.branch
-      })
-      return { mergeMode: 'pull-request', pullRequestUrl: url }
+    try {
+      const existing = await loadProjects()
+      const project = existing.find((candidate) => candidate.id === session.projectId)
+      if (!project) {
+        throw new Error(`Unknown project: ${session.projectId}`)
+      }
+
+      if (project.mergeMode === 'local-merge') {
+        await adapters.git.mergeWorktree({
+          projectPath: project.path,
+          worktreePath: session.worktreePath,
+          branch: session.branch
+        })
+        // The branch is fully integrated the moment mergeWorktree resolves -
+        // nothing left in the worktree is worth reviewing, so it's safe to
+        // reclaim right away (unlike Pull request, see below).
+        if (await removeWorktreeIfPossible(project, session)) {
+          await markWorktreeRemoved(sessionId)
+        }
+        return { mergeMode: 'local-merge' }
+      }
+
+      if (project.mergeMode === 'pull-request') {
+        await adapters.git.pushBranch(session.worktreePath, session.branch)
+        const { url } = await adapters.github.openPullRequest({
+          projectPath: project.path,
+          branch: session.branch,
+          title: session.branch
+        })
+        // Opening the PR doesn't integrate the branch yet - refreshSessionStatuses
+        // polls it via this URL and reclaims the worktree once GitHub reports
+        // it actually merged.
+        await serializeSessionWrite(async () => {
+          sessions = sessions.map((candidate) =>
+            candidate.id === sessionId ? { ...candidate, pullRequestUrl: url } : candidate
+          )
+        })
+        return { mergeMode: 'pull-request', pullRequestUrl: url }
+      }
+
+      // Manual: the Diff stays visible for the user to merge themselves - no adapter call.
+      return { mergeMode: 'manual' }
+    } finally {
+      worktreeOpInFlight.delete(sessionId)
     }
+  }
 
-    // Manual: the Diff stays visible for the user to merge themselves - no adapter call.
-    return { mergeMode: 'manual' }
+  async function discardWorktree(sessionId: string): Promise<Session> {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+    if (ACTIVE_STATUSES.has(session.status)) {
+      throw new Error(`Session is still active: ${sessionId}`)
+    }
+    if (session.worktreeRemoved) {
+      throw new Error(`Worktree already removed for session: ${sessionId}`)
+    }
+    if (worktreeOpInFlight.has(sessionId)) {
+      throw new Error(`A worktree operation is already in progress for session: ${sessionId}`)
+    }
+    worktreeOpInFlight.add(sessionId)
+
+    try {
+      const existing = await loadProjects()
+      const project = existing.find((candidate) => candidate.id === session.projectId)
+      if (!project) {
+        throw new Error(`Unknown project: ${session.projectId}`)
+      }
+
+      // Explicit discard, unlike merge-mode cleanup above: the user is
+      // deliberately throwing away unreviewed/unmerged work, so this forces
+      // past git's refusal to remove a worktree with outstanding changes.
+      // Run outside serializeSessionWrite (unlike stopSession/respondToPrompt)
+      // so this subprocess call can't stall unrelated sessions' status
+      // refreshes - only the final, near-instant array update needs the queue.
+      await adapters.git.discardWorktree(project.path, session.worktreePath)
+
+      return await markWorktreeRemoved(sessionId)
+    } finally {
+      worktreeOpInFlight.delete(sessionId)
+    }
   }
 
   async function spawnSession(projectId: string): Promise<Session> {
@@ -178,15 +285,56 @@ export function createEngine(adapters: EngineAdapters): Engine {
     if (!session) {
       throw new Error(`Unknown session: ${sessionId}`)
     }
+    if (session.worktreeRemoved) {
+      throw new Error(`Worktree already removed for session: ${sessionId}`)
+    }
 
     return adapters.git.getDiff(session.worktreePath, session.baseRef)
+  }
+
+  // Pull request Merge mode leaves a Session's worktree in place after
+  // requestMerge, since opening a PR doesn't integrate the branch - only
+  // GitHub actually merging it does. Called once per refresh for every
+  // non-active Session with an open PR still tracked, so the worktree is
+  // reclaimed once that eventually happens.
+  async function checkPullRequestMerged(session: Session): Promise<Session> {
+    if (!session.pullRequestUrl || session.worktreeRemoved) return session
+    // A concurrent requestMerge/discardWorktree call already owns this
+    // Session's worktree - skip it this tick and check again on the next.
+    if (worktreeOpInFlight.has(session.id)) return session
+
+    let status: PullRequestStatus
+    try {
+      status = await adapters.github.getPullRequestStatus(session.pullRequestUrl)
+    } catch (error) {
+      // A blip (gh unauthenticated, GitHub unreachable, PR deleted) shouldn't
+      // fail the whole refresh cycle - every other session's status update
+      // in the same Promise.all would be lost too. Just retry next tick.
+      console.error(`Failed to check pull request status for session ${session.id}:`, error)
+      return session
+    }
+    if (status !== 'merged') return session
+
+    const existing = await loadProjects()
+    const project = existing.find((candidate) => candidate.id === session.projectId)
+    if (!project) return session
+
+    worktreeOpInFlight.add(session.id)
+    try {
+      const removed = await removeWorktreeIfPossible(project, session)
+      return removed ? { ...session, worktreeRemoved: true } : session
+    } finally {
+      worktreeOpInFlight.delete(session.id)
+    }
   }
 
   function refreshSessionStatuses(): Promise<Session[]> {
     return serializeSessionWrite(async () => {
       sessions = await Promise.all(
         sessions.map(async (session) => {
-          if (!ACTIVE_STATUSES.has(session.status)) return session
+          if (!ACTIVE_STATUSES.has(session.status)) {
+            return checkPullRequestMerged(session)
+          }
 
           if (!adapters.process.isAlive(session.pid)) {
             const exitCode = adapters.process.exitCode(session.pid)
@@ -360,6 +508,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     getDiff,
     setProjectMergeMode,
     requestMerge,
-    discoverSessions
+    discoverSessions,
+    discardWorktree
   }
 }

@@ -801,6 +801,27 @@ describe('Engine.getDiff', () => {
 
     expect(git.getDiffCalls).toEqual([{ worktreePath: spawned.worktreePath, baseRef: spawned.baseRef }])
   })
+
+  it('rejects once the worktree has been removed, rather than diffing a path that no longer exists', async () => {
+    const localMergeSeeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'local-merge' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: localMergeSeeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+    await engine.requestMerge(spawned.id)
+
+    await expect(engine.getDiff(spawned.id)).rejects.toThrow(
+      `Worktree already removed for session: ${spawned.id}`
+    )
+  })
 })
 
 describe('Engine.setProjectMergeMode', () => {
@@ -1010,6 +1031,345 @@ describe('Engine.requestMerge', () => {
     const spawned = await engine.spawnSession('project-1')
 
     await expect(engine.requestMerge(spawned.id)).rejects.toThrow(`Session is not finished: ${spawned.id}`)
+  })
+
+  it('removes the worktree once a Local merge actually succeeds, since nothing is left to review', async () => {
+    const seeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'local-merge' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+
+    await engine.requestMerge(spawned.id)
+
+    expect(git.removeWorktreeCalls).toEqual([
+      { projectPath: '/tmp/my-project', worktreePath: spawned.worktreePath }
+    ])
+    const [session] = await engine.listSessions()
+    expect(session.worktreeRemoved).toBe(true)
+  })
+
+  it('leaves the worktree in place if the Git adapter fails to remove it after a Local merge', async () => {
+    const seeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'local-merge' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    git.removeWorktree = async () => {
+      throw new Error('worktree still has uncommitted changes')
+    }
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+
+    await engine.requestMerge(spawned.id)
+
+    const [session] = await engine.listSessions()
+    expect(session.worktreeRemoved).toBeUndefined()
+  })
+
+  it('leaves the worktree in place after opening a Pull request, since the branch is not integrated yet', async () => {
+    const seeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'pull-request' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+
+    const result = await engine.requestMerge(spawned.id)
+
+    expect(git.removeWorktreeCalls).toEqual([])
+    const [session] = await engine.listSessions()
+    expect(session.worktreeRemoved).toBeUndefined()
+    expect(session.pullRequestUrl).toBe(result.pullRequestUrl)
+  })
+
+  it('rejects a second merge request once the worktree has already been removed', async () => {
+    const seeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'local-merge' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+    await engine.requestMerge(spawned.id)
+
+    await expect(engine.requestMerge(spawned.id)).rejects.toThrow(
+      `Worktree already removed for session: ${spawned.id}`
+    )
+  })
+
+  it('rejects a concurrent second requestMerge for the same session while the first is still in flight', async () => {
+    const seeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'local-merge' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+
+    let releaseMerge!: () => void
+    const mergeStarted = new Promise<void>((resolveStarted) => {
+      const original = git.mergeWorktree.bind(git)
+      git.mergeWorktree = async (params) => {
+        resolveStarted()
+        await new Promise<void>((resolveRelease) => {
+          releaseMerge = resolveRelease
+        })
+        return original(params)
+      }
+    })
+
+    const first = engine.requestMerge(spawned.id)
+    await mergeStarted
+
+    await expect(engine.requestMerge(spawned.id)).rejects.toThrow(
+      `A worktree operation is already in progress for session: ${spawned.id}`
+    )
+
+    releaseMerge()
+    await first
+  })
+})
+
+describe('Engine.refreshSessionStatuses (Pull request worktree cleanup)', () => {
+  async function spawnSessionWithOpenPullRequest() {
+    const seeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'pull-request' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+    const { pullRequestUrl } = await engine.requestMerge(spawned.id)
+
+    return { engine, git, github, spawned, pullRequestUrl: pullRequestUrl! }
+  }
+
+  it('removes the worktree once GitHub reports the pull request merged', async () => {
+    const { engine, git, github, spawned, pullRequestUrl } = await spawnSessionWithOpenPullRequest()
+    github.simulateMerged(pullRequestUrl)
+
+    await engine.refreshSessionStatuses()
+
+    expect(git.removeWorktreeCalls).toEqual([
+      { projectPath: '/tmp/my-project', worktreePath: spawned.worktreePath }
+    ])
+    const [session] = await engine.listSessions()
+    expect(session.worktreeRemoved).toBe(true)
+  })
+
+  it('leaves the worktree in place while the pull request is still open', async () => {
+    const { engine, git } = await spawnSessionWithOpenPullRequest()
+
+    await engine.refreshSessionStatuses()
+
+    expect(git.removeWorktreeCalls).toEqual([])
+    const [session] = await engine.listSessions()
+    expect(session.worktreeRemoved).toBeUndefined()
+  })
+
+  it('leaves the worktree in place when the pull request is closed without merging', async () => {
+    const { engine, git, github, pullRequestUrl } = await spawnSessionWithOpenPullRequest()
+    github.simulateClosed(pullRequestUrl)
+
+    await engine.refreshSessionStatuses()
+
+    expect(git.removeWorktreeCalls).toEqual([])
+    const [session] = await engine.listSessions()
+    expect(session.worktreeRemoved).toBeUndefined()
+  })
+
+  it('does not poll GitHub for sessions without a pull request', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+
+    await engine.refreshSessionStatuses()
+
+    expect(github.getPullRequestStatusCalls).toEqual([])
+  })
+
+  it('stops polling GitHub once the worktree has been removed', async () => {
+    const { engine, github, pullRequestUrl } = await spawnSessionWithOpenPullRequest()
+    github.simulateMerged(pullRequestUrl)
+    await engine.refreshSessionStatuses()
+
+    await engine.refreshSessionStatuses()
+
+    expect(github.getPullRequestStatusCalls).toEqual([pullRequestUrl])
+  })
+
+  it("does not drop other sessions' status updates when checking a pull request's status fails", async () => {
+    const seeded = [
+      { id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'pull-request' as const }
+    ]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const withPr = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(withPr.pid, 0)
+    await engine.refreshSessionStatuses()
+    await engine.requestMerge(withPr.id)
+    github.getPullRequestStatus = async () => {
+      throw new Error('gh: not authenticated')
+    }
+
+    const unrelated = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(unrelated.pid, 0)
+
+    await expect(engine.refreshSessionStatuses()).resolves.not.toThrow()
+
+    const sessions = await engine.listSessions()
+    expect(sessions.find((s) => s.id === unrelated.id)?.status).toBe('done')
+  })
+})
+
+describe('Engine.discardWorktree', () => {
+  async function spawnStoppedSession() {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    await engine.stopSession(spawned.id)
+
+    return { engine, git, spawned }
+  }
+
+  it("force-removes the session's worktree via the Git adapter", async () => {
+    const { engine, git, spawned } = await spawnStoppedSession()
+
+    await engine.discardWorktree(spawned.id)
+
+    expect(git.discardWorktreeCalls).toEqual([
+      { projectPath: '/tmp/my-project', worktreePath: spawned.worktreePath }
+    ])
+  })
+
+  it('marks the worktree removed so it is reflected through listSessions', async () => {
+    const { engine, spawned } = await spawnStoppedSession()
+
+    const discarded = await engine.discardWorktree(spawned.id)
+
+    expect(discarded.worktreeRemoved).toBe(true)
+    const [session] = await engine.listSessions()
+    expect(session.worktreeRemoved).toBe(true)
+  })
+
+  it('rejects when the session id is unknown', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await expect(engine.discardWorktree('missing')).rejects.toThrow('Unknown session: missing')
+  })
+
+  it('rejects when the session is still active', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+
+    await expect(engine.discardWorktree(spawned.id)).rejects.toThrow(`Session is still active: ${spawned.id}`)
+  })
+
+  it('rejects when the worktree has already been removed', async () => {
+    const { engine, spawned } = await spawnStoppedSession()
+    await engine.discardWorktree(spawned.id)
+
+    await expect(engine.discardWorktree(spawned.id)).rejects.toThrow(
+      `Worktree already removed for session: ${spawned.id}`
+    )
+  })
+
+  it('rejects a concurrent second discardWorktree for the same session while the first is still in flight', async () => {
+    const { engine, git, spawned } = await spawnStoppedSession()
+
+    let releaseDiscard!: () => void
+    const discardStarted = new Promise<void>((resolveStarted) => {
+      const original = git.discardWorktree.bind(git)
+      git.discardWorktree = async (projectPath, worktreePath) => {
+        resolveStarted()
+        await new Promise<void>((resolveRelease) => {
+          releaseDiscard = resolveRelease
+        })
+        return original(projectPath, worktreePath)
+      }
+    })
+
+    const first = engine.discardWorktree(spawned.id)
+    await discardStarted
+
+    await expect(engine.discardWorktree(spawned.id)).rejects.toThrow(
+      `A worktree operation is already in progress for session: ${spawned.id}`
+    )
+
+    releaseDiscard()
+    await first
   })
 })
 

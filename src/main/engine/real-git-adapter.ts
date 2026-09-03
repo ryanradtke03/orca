@@ -127,6 +127,12 @@ export function createRealGitAdapter(worktreesRootDir: string): GitAdapter {
       await execFileAsync('git', ['worktree', 'remove', worktreePath], { cwd: projectPath })
     },
 
+    async discardWorktree(projectPath: string, worktreePath: string) {
+      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
+        cwd: projectPath
+      })
+    },
+
     async getDiff(worktreePath: string, baseRef: string) {
       // Compares baseRef's tree against the worktree's current working tree,
       // covering both committed-on-branch and still-uncommitted changes -

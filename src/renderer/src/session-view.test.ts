@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, Session } from '../../shared/ipc-contract'
 import {
+  canDiscardWorktree,
+  canRequestMerge,
+  canViewDiff,
   describeMergeMode,
   describeStatus,
   groupSessionsByProject,
@@ -134,6 +137,48 @@ describe('isMergeable', () => {
     expect(isMergeable('waiting-on-permission')).toBe(false)
     expect(isMergeable('waiting-on-input')).toBe(false)
     expect(isMergeable('idle')).toBe(false)
+  })
+})
+
+describe('canRequestMerge', () => {
+  it('is true for a done session with its worktree still present', () => {
+    expect(canRequestMerge(makeSession({ status: 'done' }))).toBe(true)
+  })
+
+  it('is false once the worktree has been removed', () => {
+    expect(canRequestMerge(makeSession({ status: 'done', worktreeRemoved: true }))).toBe(false)
+  })
+
+  it('is false for a non-done session', () => {
+    expect(canRequestMerge(makeSession({ status: 'errored' }))).toBe(false)
+  })
+})
+
+describe('canViewDiff', () => {
+  it('is true while the worktree is still present', () => {
+    expect(canViewDiff(makeSession({ status: 'running' }))).toBe(true)
+  })
+
+  it('is false once the worktree has been removed', () => {
+    expect(canViewDiff(makeSession({ status: 'done', worktreeRemoved: true }))).toBe(false)
+  })
+})
+
+describe('canDiscardWorktree', () => {
+  it('is true for a terminal session with its worktree still present', () => {
+    expect(canDiscardWorktree(makeSession({ status: 'done' }))).toBe(true)
+    expect(canDiscardWorktree(makeSession({ status: 'errored' }))).toBe(true)
+    expect(canDiscardWorktree(makeSession({ status: 'stopped' }))).toBe(true)
+  })
+
+  it('is false for a session still running', () => {
+    expect(canDiscardWorktree(makeSession({ status: 'running' }))).toBe(false)
+    expect(canDiscardWorktree(makeSession({ status: 'waiting-on-permission' }))).toBe(false)
+    expect(canDiscardWorktree(makeSession({ status: 'waiting-on-input' }))).toBe(false)
+  })
+
+  it('is false once the worktree has already been removed', () => {
+    expect(canDiscardWorktree(makeSession({ status: 'done', worktreeRemoved: true }))).toBe(false)
   })
 })
 
