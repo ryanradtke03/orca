@@ -1,4 +1,4 @@
-import type { GitHubAdapter, PullRequestStatus } from './adapters'
+import type { GitHubAdapter, PullRequestStatus } from '../../adapters'
 
 export interface FakeGitHubAdapter extends GitHubAdapter {
   openPullRequestCalls: { projectPath: string; branch: string; title: string }[]

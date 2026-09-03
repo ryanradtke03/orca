@@ -1,11 +1,11 @@
 import type { FileDiff } from '../shared/ipc-contract'
 import { createEngine, type Engine } from './engine/engine'
-import { createFakeDiscoveryAdapter } from './engine/fake-discovery-adapter'
-import { createFakeGitAdapter, type FakeGitAdapter } from './engine/fake-git-adapter'
-import { createFakeGitHubAdapter, type FakeGitHubAdapter } from './engine/fake-github-adapter'
-import { createFakeNotificationAdapter } from './engine/fake-notification-adapter'
-import { createFakePersistenceAdapter } from './engine/fake-persistence-adapter'
-import { createFakeProcessAdapter, type FakeProcessAdapter } from './engine/fake-process-adapter'
+import { createFakeDiscoveryAdapter } from './engine/adapters/discovery/fake'
+import { createFakeGitAdapter, type FakeGitAdapter } from './engine/adapters/git/fake'
+import { createFakeGitHubAdapter, type FakeGitHubAdapter } from './engine/adapters/github/fake'
+import { createFakeNotificationAdapter } from './engine/adapters/notification/fake'
+import { createFakePersistenceAdapter } from './engine/adapters/persistence/fake'
+import { createFakeProcessAdapter, type FakeProcessAdapter } from './engine/adapters/process/fake'
 
 const DEMO_PROJECT_ID = 'demo-project'
 const LOCAL_MERGE_PROJECT_ID = 'demo-project-local-merge'
@@ -72,16 +72,16 @@ const RICH_DIFF: FileDiff[] = [
     ].join('\n')
   },
   {
-    path: 'src/main/engine/git-diff-parser.ts',
+    path: 'src/main/engine/adapters/git/diff-parser.ts',
     status: 'added',
     additions: 3,
     deletions: 0,
     diffText: [
-      'diff --git a/src/main/engine/git-diff-parser.ts b/src/main/engine/git-diff-parser.ts',
+      'diff --git a/src/main/engine/adapters/git/diff-parser.ts b/src/main/engine/adapters/git/diff-parser.ts',
       'new file mode 100644',
       'index 0000000..1234567',
       '--- /dev/null',
-      '+++ b/src/main/engine/git-diff-parser.ts',
+      '+++ b/src/main/engine/adapters/git/diff-parser.ts',
       '@@ -0,0 +1,3 @@',
       '+export function parseUnifiedDiff(raw: string) {',
       '+  return []',

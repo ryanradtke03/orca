@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseUnifiedDiff } from './git-diff-parser'
+import { parseUnifiedDiff } from './diff-parser'
 
 describe('parseUnifiedDiff', () => {
   it('returns an empty array for an empty diff', () => {

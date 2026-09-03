@@ -1,14 +1,14 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import * as pty from 'node-pty'
-import type { PendingPrompt, ProcessAdapter, ProcessInfo } from './adapters'
+import type { PendingPrompt, ProcessAdapter, ProcessInfo } from '../../adapters'
 import {
   createAgentStatusLister,
   promptTypeFromStatus,
   type AgentStatusEntry,
   type ListAgentStatuses
-} from './agent-status'
-import { extractPromptText, renderScreen, TERMINAL_COLS, TERMINAL_ROWS } from './prompt-text'
+} from '../../claude-cli/agent-status'
+import { extractPromptText, renderScreen, TERMINAL_COLS, TERMINAL_ROWS } from '../../claude-cli/prompt-text'
 
 const execFileAsync = promisify(execFile)
 

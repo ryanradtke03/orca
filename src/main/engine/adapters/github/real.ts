@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import type { GitHubAdapter } from './adapters'
+import type { GitHubAdapter } from '../../adapters'
 
 const execFileAsync = promisify(execFile)
 

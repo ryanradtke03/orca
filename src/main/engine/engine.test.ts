@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { createEngine } from './engine'
-import { createFakeDiscoveryAdapter } from './fake-discovery-adapter'
-import { createFakeGitAdapter } from './fake-git-adapter'
-import { createFakeGitHubAdapter } from './fake-github-adapter'
-import { createFakeNotificationAdapter } from './fake-notification-adapter'
-import { createFakePersistenceAdapter } from './fake-persistence-adapter'
-import { createFakeProcessAdapter } from './fake-process-adapter'
+import { createFakeDiscoveryAdapter } from './adapters/discovery/fake'
+import { createFakeGitAdapter } from './adapters/git/fake'
+import { createFakeGitHubAdapter } from './adapters/github/fake'
+import { createFakeNotificationAdapter } from './adapters/notification/fake'
+import { createFakePersistenceAdapter } from './adapters/persistence/fake'
+import { createFakeProcessAdapter } from './adapters/process/fake'
 
 describe('Engine.ping', () => {
   it('reports ok status and the session count from the persistence adapter', async () => {

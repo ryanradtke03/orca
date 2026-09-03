@@ -5,12 +5,12 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AgentStatusEntry } from './agent-status'
-import { createRealDiscoveryAdapter } from './real-discovery-adapter'
+import type { AgentStatusEntry } from '../../claude-cli/agent-status'
+import { createRealDiscoveryAdapter } from './real'
 
 const execFileAsync = promisify(execFile)
 
-const FAKE_CLI = join(__dirname, 'real-process-adapter.fake-cli.cjs')
+const FAKE_CLI = join(__dirname, '../../claude-cli/fake-cli.cjs')
 
 async function createTempGitRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'orca-discovery-project-'))

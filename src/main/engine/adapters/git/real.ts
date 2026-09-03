@@ -2,8 +2,8 @@ import { execFile } from 'child_process'
 import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { promisify } from 'util'
-import type { GitAdapter } from './adapters'
-import { parseUnifiedDiff } from './git-diff-parser'
+import type { GitAdapter } from '../../adapters'
+import { parseUnifiedDiff } from './diff-parser'
 
 const execFileAsync = promisify(execFile)
 

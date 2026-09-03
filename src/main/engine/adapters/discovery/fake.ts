@@ -1,4 +1,4 @@
-import type { DiscoveredSession, DiscoveryAdapter } from './adapters'
+import type { DiscoveredSession, DiscoveryAdapter } from '../../adapters'
 
 export interface FakeDiscoveryAdapter extends DiscoveryAdapter {
   // Queues a session for the next scan() to report - simulating a `claude`
