@@ -1,148 +1,166 @@
-import { randomUUID } from 'crypto'
-import { spawn, type ChildProcess } from 'child_process'
-import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'fs'
-import { tmpdir } from 'os'
-import { join } from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import * as pty from 'node-pty'
 import type { PendingPrompt, ProcessAdapter, ProcessInfo } from './adapters'
-import { detectPendingPrompt } from './prompt-detection'
+import { createAgentStatusLister, promptTypeFromStatus, type ListAgentStatuses } from './agent-status'
+import { extractPromptText, renderScreen } from './prompt-text'
 
-// Caps how much raw output we retain per session. Prompt detection only ever
-// looks at the tail, so this just bounds memory for long-running sessions.
-const OUTPUT_BUFFER_LIMIT = 16_000
+const execFileAsync = promisify(execFile)
 
-const OUTPUT_POLL_INTERVAL_MS = 300
+const POLL_INTERVAL_MS = 300
+const RESOLVE_PID_TIMEOUT_MS = 5000
+const RESOLVE_PID_RETRY_MS = 100
 
-interface TrackedProcess {
+// The CLI prints this line (and exits immediately) once a background session
+// is up: `backgrounded · <id>`.
+const BACKGROUNDED_ID_PATTERN = /backgrounded\s*\S\s*(\S+)/
+
+// A background session's underlying process is owned by the CLI's own
+// background service (ADR 0002: it must survive Orca quitting), not by Orca
+// directly - a plain node-pty spawn dies with its holder process, so it
+// can't be used for the session itself. node-pty is only used for the
+// short-lived `attach` we open to deliver a response (see respond()); that
+// attach can safely die with Orca, since it isn't what keeps the session alive.
+interface TrackedSession {
+  id: string
+  pid: number
   alive: boolean
   exitCode: number | null
-  child: ChildProcess
   pendingPrompt: PendingPrompt | null
-  logPath: string
-  lastLogSize: number
-  pollTimer: ReturnType<typeof setInterval>
 }
 
 export function createRealProcessAdapter(
   command = 'claude',
   args: string[] = [],
-  logsDir: string = join(tmpdir(), 'orca-session-logs')
+  listAgentStatuses: ListAgentStatuses = createAgentStatusLister(command)
 ): ProcessAdapter {
-  const processes = new Map<number, TrackedProcess>()
-  mkdirSync(logsDir, { recursive: true })
+  const sessions = new Map<number, TrackedSession>()
 
-  function pollOutput(tracked: TrackedProcess): void {
-    let size: number
-    try {
-      size = statSync(tracked.logPath).size
-    } catch {
+  async function refreshPendingPrompt(tracked: TrackedSession, waitingFor: string | undefined): Promise<void> {
+    const type = promptTypeFromStatus({ status: 'waiting', waitingFor })
+    if (!type) {
+      tracked.pendingPrompt = null
       return
     }
-    if (size === tracked.lastLogSize) return
-    tracked.lastLogSize = size
 
-    const content = readFileSync(tracked.logPath, 'utf-8').slice(-OUTPUT_BUFFER_LIMIT)
-    tracked.pendingPrompt = detectPendingPrompt(content)
+    const stdout = await execFileAsync(command, ['logs', tracked.id])
+      .then((result) => result.stdout)
+      .catch(() => '')
+    const lines = await renderScreen(stdout)
+    const text = extractPromptText(lines)
+    tracked.pendingPrompt = text ? { type, text } : null
+  }
+
+  async function poll(): Promise<void> {
+    if (sessions.size === 0) return
+
+    const statuses = await listAgentStatuses()
+    const byId = new Map(statuses.map((entry) => [entry.id, entry]))
+
+    for (const tracked of sessions.values()) {
+      if (!tracked.alive) continue
+      const entry = byId.get(tracked.id)
+
+      // Once a session's underlying process is gone - it finished, crashed,
+      // or was stopped - the CLI keeps a stub entry around (for `claude rm`)
+      // but drops its `pid`.
+      if (!entry || entry.pid === undefined) {
+        tracked.alive = false
+        tracked.exitCode = entry?.state === 'done' ? 0 : 1
+        tracked.pendingPrompt = null
+        continue
+      }
+
+      if (entry.status === 'waiting') {
+        await refreshPendingPrompt(tracked, entry.waitingFor)
+      } else {
+        tracked.pendingPrompt = null
+      }
+    }
+  }
+
+  const pollTimer = setInterval(() => {
+    void poll()
+  }, POLL_INTERVAL_MS)
+  pollTimer.unref()
+
+  // The background service takes a moment to register a just-spawned session
+  // after `--bg` prints its id and returns, so the first `agents` listing
+  // right after spawn can still miss it.
+  async function resolvePid(id: string): Promise<number> {
+    const deadline = Date.now() + RESOLVE_PID_TIMEOUT_MS
+    for (;;) {
+      const statuses = await listAgentStatuses()
+      const pid = statuses.find((entry) => entry.id === id)?.pid
+      if (pid !== undefined) return pid
+
+      if (Date.now() >= deadline) {
+        throw new Error(`Spawned background session "${id}" is not listed by \`claude agents\``)
+      }
+      await new Promise((resolve) => setTimeout(resolve, RESOLVE_PID_RETRY_MS))
+    }
   }
 
   return {
     async spawnClaude(cwd: string): Promise<ProcessInfo> {
-      return new Promise((resolve, reject) => {
-        const logPath = join(logsDir, `${randomUUID()}.log`)
-        // The CLI's stdout/stderr are redirected to a file rather than piped to
-        // this process. Sessions are spawned detached so they keep running after
-        // Orca quits (ADR 0002); a piped stdout would EPIPE the child the moment
-        // Orca closes its end of that pipe on exit. stdin stays piped since only
-        // a live Orca can forward a response anyway.
-        const logFd = openSync(logPath, 'a')
+      const { stdout } = await execFileAsync(command, [...args, '--bg'], { cwd })
+      const match = BACKGROUNDED_ID_PATTERN.exec(stdout)
+      if (!match) {
+        throw new Error(`Could not parse a background session id from: ${stdout}`)
+      }
+      const id = match[1]
+      const pid = await resolvePid(id)
 
-        const child = spawn(command, args, {
-          cwd,
-          detached: true,
-          stdio: ['pipe', logFd, logFd]
-        })
-        closeSync(logFd)
-
-        child.once('error', (error) => {
-          reject(error)
-        })
-
-        child.once('spawn', () => {
-          const pid = child.pid
-          if (pid === undefined) {
-            reject(new Error(`Failed to spawn "${command}": no pid was assigned`))
-            return
-          }
-
-          const tracked: TrackedProcess = {
-            alive: true,
-            exitCode: null,
-            child,
-            pendingPrompt: null,
-            logPath,
-            lastLogSize: 0,
-            pollTimer: setInterval(() => pollOutput(tracked), OUTPUT_POLL_INTERVAL_MS)
-          }
-          processes.set(pid, tracked)
-
-          child.on('exit', (code) => {
-            tracked.alive = false
-            tracked.exitCode = code ?? null
-            tracked.pendingPrompt = null
-            clearInterval(tracked.pollTimer)
-            try {
-              unlinkSync(tracked.logPath)
-            } catch {
-              // Already gone, or never got written.
-            }
-          })
-
-          child.unref()
-
-          resolve({ pid })
-        })
-      })
+      sessions.set(pid, { id, pid, alive: true, exitCode: null, pendingPrompt: null })
+      return { pid }
     },
 
     async stop(pid: number): Promise<void> {
-      try {
-        // Sessions are spawned detached (their own process group leader), so
-        // signal the whole group to also reach any subprocesses `claude` started.
-        process.kill(-pid, 'SIGTERM')
-      } catch {
-        try {
-          process.kill(pid, 'SIGTERM')
-        } catch {
-          // Already exited.
-        }
-      }
+      const tracked = sessions.get(pid)
+      if (!tracked) return
+      await execFileAsync(command, ['stop', tracked.id]).catch(() => {})
     },
 
     isAlive(pid: number): boolean {
-      return processes.get(pid)?.alive ?? false
+      return sessions.get(pid)?.alive ?? false
     },
 
     exitCode(pid: number): number | null {
-      return processes.get(pid)?.exitCode ?? null
+      return sessions.get(pid)?.exitCode ?? null
     },
 
     pendingPrompt(pid: number): PendingPrompt | null {
-      return processes.get(pid)?.pendingPrompt ?? null
+      return sessions.get(pid)?.pendingPrompt ?? null
     },
 
     async respond(pid: number, response: string): Promise<void> {
-      const tracked = processes.get(pid)
-      if (!tracked || !tracked.alive) return
+      const tracked = sessions.get(pid)
+      if (!tracked) return
 
       await new Promise<void>((resolve, reject) => {
-        tracked.child.stdin?.write(`${response}\n`, (error) => {
-          if (error) {
-            reject(error)
-            return
-          }
-          tracked.pendingPrompt = null
-          resolve()
+        const child = pty.spawn(command, ['attach', tracked.id], { cols: 220, rows: 60 })
+        let wrote = false
+
+        child.onData(() => {
+          if (wrote) return
+          wrote = true
+          // Give the TUI a moment to finish rendering after "Attaching…"
+          // before it can reliably accept a keypress.
+          setTimeout(() => {
+            child.write(`${response}\r`)
+            setTimeout(() => {
+              child.kill()
+              resolve()
+            }, 300)
+          }, 200)
+        })
+
+        child.onExit(({ exitCode }) => {
+          if (!wrote) reject(new Error(`attach for session "${tracked.id}" exited before accepting input (code ${exitCode})`))
         })
       })
+
+      tracked.pendingPrompt = null
     }
   }
 }
