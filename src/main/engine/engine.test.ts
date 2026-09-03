@@ -1733,6 +1733,203 @@ describe('Engine.discoverSessions', () => {
   })
 })
 
+describe('Engine.adoptSession', () => {
+  it('adds a manually adopted session to an existing Project matched by path', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateManualOnlySession({
+      pid: 5150,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'manual-branch',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const session = await engine.adoptSession(5150, '/tmp/my-project')
+
+    expect(session).toEqual({
+      id: expect.any(String),
+      projectId: 'project-1',
+      worktreePath: '/tmp/my-project',
+      branch: 'manual-branch',
+      baseRef: 'abc123',
+      pid: 5150,
+      status: 'running',
+      pendingPrompt: undefined
+    })
+  })
+
+  it('surfaces the adopted session through listSessions afterward', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateManualOnlySession({
+      pid: 5150,
+      cwd: '/tmp/unlisted-project',
+      projectPath: '/tmp/unlisted-project',
+      branch: 'manual-branch',
+      baseRef: 'abc123',
+      status: 'idle'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await engine.adoptSession(5150, '/tmp/unlisted-project')
+
+    await expect(engine.listSessions()).resolves.toEqual([
+      expect.objectContaining({ pid: 5150, status: 'idle' })
+    ])
+  })
+
+  it('creates a new Project when no existing Project matches the resolved project path', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateManualOnlySession({
+      pid: 5150,
+      cwd: '/tmp/unlisted-project',
+      projectPath: '/tmp/unlisted-project',
+      branch: 'main',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const session = await engine.adoptSession(5150, '/tmp/unlisted-project')
+
+    const projects = await engine.listProjects()
+    expect(projects).toEqual([
+      { id: expect.any(String), path: '/tmp/unlisted-project', name: 'unlisted-project', mergeMode: 'manual' }
+    ])
+    expect(session.projectId).toBe(projects[0].id)
+  })
+
+  it('persists a newly created Project so a fresh Engine sees it too', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateManualOnlySession({
+      pid: 5150,
+      cwd: '/tmp/unlisted-project',
+      projectPath: '/tmp/unlisted-project',
+      branch: 'main',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    await engine.adoptSession(5150, '/tmp/unlisted-project')
+
+    const freshEngine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    await expect(freshEngine.listProjects()).resolves.toHaveLength(1)
+  })
+
+  it('carries over a pending prompt reported by the resolved session', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateManualOnlySession({
+      pid: 5150,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'manual-branch',
+      baseRef: 'abc123',
+      status: 'waiting-on-permission',
+      pendingPrompt: { type: 'permission', text: 'Run npm install?' }
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const session = await engine.adoptSession(5150, '/tmp/my-project')
+
+    expect(session.status).toBe('waiting-on-permission')
+    expect(session.pendingPrompt).toEqual({ type: 'permission', text: 'Run npm install?' })
+  })
+
+  it('rejects adopting a pid Discovery cannot resolve', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await expect(engine.adoptSession(5150, '/tmp/nowhere')).rejects.toThrow()
+    await expect(engine.listSessions()).resolves.toEqual([])
+  })
+
+  it('rejects adopting a pid that is already tracked as an active Session', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    discovery.simulateManualOnlySession({
+      pid: spawned.pid,
+      cwd: spawned.worktreePath,
+      projectPath: '/tmp/my-project',
+      branch: spawned.branch,
+      baseRef: spawned.baseRef,
+      status: 'running'
+    })
+
+    await expect(engine.adoptSession(spawned.pid, spawned.worktreePath)).rejects.toThrow()
+    await expect(engine.listSessions()).resolves.toEqual([spawned])
+  })
+
+  it('allows re-adopting a pid whose earlier Session has reached a terminal status', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const finished = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(finished.pid, 0)
+    await engine.refreshSessionStatuses()
+    discovery.simulateManualOnlySession({
+      pid: finished.pid,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'reused-pid-branch',
+      baseRef: 'def456',
+      status: 'running'
+    })
+
+    const adopted = await engine.adoptSession(finished.pid, '/tmp/my-project')
+
+    expect(adopted.id).not.toBe(finished.id)
+    const sessions = await engine.listSessions()
+    expect(sessions).toEqual([
+      expect.objectContaining({ id: finished.id, status: 'done' }),
+      expect.objectContaining({ id: adopted.id, branch: 'reused-pid-branch', status: 'running' })
+    ])
+  })
+})
+
 describe('Engine.spawnSession vs Engine.discoverSessions race', () => {
   it('adopts the Session Discovery already added for a pid, instead of adding a second one', async () => {
     const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]

@@ -30,6 +30,11 @@ let latestSessions: Session[] = []
 type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string }
 let currentView: View = { type: 'dashboard' }
 
+// Whether the Adopt form (sidebar footer) is expanded - reset once an adopt
+// succeeds, but otherwise left open across re-renders so a failed attempt's
+// status message stays next to the form the user can retry from.
+let adoptFormOpen = false
+
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -327,7 +332,8 @@ function renderSidebar(
         id: 'add-project-button',
         className: 'js-add-project',
         textContent: '+ Add project'
-      })
+      }),
+      renderAdoptSection()
     ]),
     el('p', { id: 'sidebar-status', role: 'alert' })
   )
@@ -335,33 +341,83 @@ function renderSidebar(
   return sidebar
 }
 
+function renderAdoptSection(): HTMLElement {
+  const section = el('div', { id: 'adopt-section' })
+
+  const toggle = el('button', {
+    type: 'button',
+    id: 'adopt-session-toggle',
+    className: 'js-toggle-adopt',
+    textContent: adoptFormOpen ? 'Cancel adopt' : 'Adopt session…'
+  })
+  section.append(toggle)
+
+  if (adoptFormOpen) {
+    const pidInput = el('input', {
+      id: 'adopt-pid-input',
+      type: 'text',
+      inputMode: 'numeric',
+      pattern: '[0-9]*',
+      className: 'adopt-input',
+      placeholder: 'PID',
+      autocomplete: 'off',
+      required: true
+    })
+    const directoryInput = el('input', {
+      id: 'adopt-directory-input',
+      type: 'text',
+      className: 'adopt-input',
+      placeholder: 'Working directory',
+      autocomplete: 'off',
+      required: true
+    })
+    const submitButton = el('button', { type: 'submit', className: 'btn', textContent: 'Adopt' })
+
+    const form = el('form', { id: 'adopt-session-form', className: 'adopt-form' }, [
+      pidInput,
+      directoryInput,
+      submitButton
+    ])
+    section.append(form)
+  }
+
+  return section
+}
+
 function setStatus(message: string): void {
   const status = document.querySelector<HTMLParagraphElement>('#sidebar-status')
   if (status) status.textContent = message
 }
 
-// Preserves whatever the user is mid-typing into a reply field across a
-// re-render, since a full rebuild would otherwise replace the input under
-// their cursor and silently drop the draft.
-interface ReplyDraft {
-  sessionId: string
+// Preserves whatever the user is mid-typing into a reply or Adopt field
+// across a re-render, since a full rebuild would otherwise replace the input
+// under their cursor and silently drop the draft.
+interface FieldDraft {
+  selector: string
   value: string
   selectionStart: number | null
 }
 
-function captureReplyDraft(): ReplyDraft | null {
+function captureFieldDraft(): FieldDraft | null {
   const active = document.activeElement
-  if (!(active instanceof HTMLInputElement) || !active.classList.contains('reply-input')) return null
-  const sessionId = active.dataset.sessionId
-  if (!sessionId) return null
-  return { sessionId, value: active.value, selectionStart: active.selectionStart }
+  if (!(active instanceof HTMLInputElement)) return null
+
+  if (active.classList.contains('reply-input') && active.dataset.sessionId) {
+    return {
+      selector: `.reply-input[data-session-id="${active.dataset.sessionId}"]`,
+      value: active.value,
+      selectionStart: active.selectionStart
+    }
+  }
+  if (active.id === 'adopt-pid-input' || active.id === 'adopt-directory-input') {
+    return { selector: `#${active.id}`, value: active.value, selectionStart: active.selectionStart }
+  }
+  return null
 }
 
-function restoreReplyDraft(draft: ReplyDraft | null): void {
+function restoreFieldDraft(draft: FieldDraft | null): void {
   if (!draft) return
-  const input = document.querySelector<HTMLInputElement>(
-    `.reply-input[data-session-id="${draft.sessionId}"]`
-  )
+  const input = document.querySelector<HTMLInputElement>(draft.selector)
   if (!input) return
   input.value = draft.value
   input.focus()
@@ -392,7 +448,7 @@ function restoreScrollPositions(positions: ScrollPositions): void {
 
 function renderDashboard(projects: Project[], sessions: Session[]): void {
   if (!app) return
-  const draft = captureReplyDraft()
+  const draft = captureFieldDraft()
   const scrollPositions = captureScrollPositions()
 
   const groups = groupSessionsByProject(projects, sessions)
@@ -402,7 +458,7 @@ function renderDashboard(projects: Project[], sessions: Session[]): void {
   app.append(renderSidebar(projects, sessions, groups, attention))
   app.append(projects.length === 0 ? renderEmptyState() : renderMain(sessions, groups, attention))
 
-  restoreReplyDraft(draft)
+  restoreFieldDraft(draft)
   restoreScrollPositions(scrollPositions)
 }
 
@@ -537,6 +593,16 @@ async function handleRequestMerge(sessionId: string): Promise<void> {
   }
 }
 
+async function handleAdoptSession(pid: number, directory: string): Promise<void> {
+  try {
+    await window.orca.adoptSession(pid, directory)
+    adoptFormOpen = false
+    await refreshAll()
+  } catch (error) {
+    setStatus(`Failed to adopt session: ${describeError(error)}`)
+  }
+}
+
 async function handleDiscardWorktree(sessionId: string): Promise<void> {
   // Discarding permanently throws away whatever unreviewed/unmerged work is
   // still sitting in the worktree - confirm before doing something the user
@@ -582,6 +648,12 @@ function handleAppClick(event: Event): void {
 
   if (target.closest('.js-add-project')) {
     void handleAddProject()
+    return
+  }
+
+  if (target.closest('.js-toggle-adopt')) {
+    adoptFormOpen = !adoptFormOpen
+    renderApp()
     return
   }
 
@@ -638,21 +710,39 @@ function handleAppChange(event: Event): void {
 
 function handleAppSubmit(event: Event): void {
   const form = event.target
-  if (!(form instanceof HTMLFormElement) || !form.classList.contains('reply-form')) return
-  event.preventDefault()
+  if (!(form instanceof HTMLFormElement)) return
 
-  const sessionId = form.dataset.sessionId
-  const input = form.querySelector<HTMLInputElement>('.reply-input')
-  const reply = input?.value.trim()
-  if (!sessionId) return
-  // `required` blocks a fully empty submit; this catches the whitespace-only case
-  // it can't, so the user still sees why nothing was sent instead of silence.
-  if (!reply) {
-    setStatus('Reply cannot be blank.')
+  if (form.classList.contains('reply-form')) {
+    event.preventDefault()
+
+    const sessionId = form.dataset.sessionId
+    const input = form.querySelector<HTMLInputElement>('.reply-input')
+    const reply = input?.value.trim()
+    if (!sessionId) return
+    // `required` blocks a fully empty submit; this catches the whitespace-only case
+    // it can't, so the user still sees why nothing was sent instead of silence.
+    if (!reply) {
+      setStatus('Reply cannot be blank.')
+      return
+    }
+
+    void handleRespondToPrompt(sessionId, reply)
     return
   }
 
-  void handleRespondToPrompt(sessionId, reply)
+  if (form.id === 'adopt-session-form') {
+    event.preventDefault()
+
+    const pidValue = form.querySelector<HTMLInputElement>('#adopt-pid-input')?.value.trim()
+    const directory = form.querySelector<HTMLInputElement>('#adopt-directory-input')?.value.trim()
+    const pid = Number(pidValue)
+    if (!pidValue || !Number.isInteger(pid) || pid <= 0 || !directory) {
+      setStatus('Enter a valid PID and working directory to adopt.')
+      return
+    }
+
+    void handleAdoptSession(pid, directory)
+  }
 }
 
 async function main(): Promise<void> {

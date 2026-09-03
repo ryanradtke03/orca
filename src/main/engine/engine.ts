@@ -26,6 +26,7 @@ export interface Engine {
   requestMerge(sessionId: string): Promise<MergeResult>
   discoverSessions(): Promise<Session[]>
   discardWorktree(sessionId: string): Promise<Session>
+  adoptSession(pid: number, directory: string): Promise<Session>
 }
 
 // Sessions whose process is still expected to be running; refreshSessionStatuses
@@ -73,6 +74,20 @@ export function createEngine(adapters: EngineAdapters): Engine {
       projects = await adapters.persistence.loadProjects()
     }
     return projects
+  }
+
+  // Matches a discovered/adopted session's project path to an existing
+  // Project, or creates one on the fly - shared by discoverSessions and
+  // adoptSession, both of which can encounter a path Orca has never seen.
+  function findOrCreateProject(
+    existingProjects: Project[],
+    path: string
+  ): { project: Project; projects: Project[] } {
+    const found = existingProjects.find((candidate) => candidate.path === path)
+    if (found) return { project: found, projects: existingProjects }
+
+    const project: Project = { id: randomUUID(), path, name: basename(path), mergeMode: 'manual' }
+    return { project, projects: [...existingProjects, project] }
   }
 
   function addProject(path: string): Promise<Project> {
@@ -450,16 +465,8 @@ export function createEngine(adapters: EngineAdapters): Engine {
         const newSessions: Session[] = []
 
         for (const entry of untracked) {
-          let project = updatedProjects.find((candidate) => candidate.path === entry.projectPath)
-          if (!project) {
-            project = {
-              id: randomUUID(),
-              path: entry.projectPath,
-              name: basename(entry.projectPath),
-              mergeMode: 'manual'
-            }
-            updatedProjects = [...updatedProjects, project]
-          }
+          const { project, projects: nextProjects } = findOrCreateProject(updatedProjects, entry.projectPath)
+          updatedProjects = nextProjects
 
           newSessions.push({
             id: randomUUID(),
@@ -486,6 +493,55 @@ export function createEngine(adapters: EngineAdapters): Engine {
     return result.then(() => sessions)
   }
 
+  // The manual fallback for a session Discovery hasn't (or can't) pick up on
+  // its own - the user identifies it by pid and working directory, and the
+  // Discovery adapter resolves the rest (project path, branch, status) from
+  // there, exactly as discoverSessions does for an automatically-found one.
+  function adoptSession(pid: number, directory: string): Promise<Session> {
+    const result = writeQueue.then(async () => {
+      if (sessions.some((session) => session.pid === pid && ACTIVE_STATUSES.has(session.status))) {
+        throw new Error(`Session already tracked: pid ${pid}`)
+      }
+
+      const resolved = await adapters.discovery.resolveManual(pid, directory)
+      if (!resolved) {
+        throw new Error(`No running Claude Code session found for pid ${pid} in ${directory}`)
+      }
+
+      return serializeSessionWrite(async () => {
+        // Re-checked after the await above, same as spawnSession/discoverSessions -
+        // a concurrent adopt/discover for this pid could have landed first.
+        if (sessions.some((session) => session.pid === resolved.pid && ACTIVE_STATUSES.has(session.status))) {
+          throw new Error(`Session already tracked: pid ${resolved.pid}`)
+        }
+
+        const existingProjects = await loadProjects()
+        const { project, projects: nextProjects } = findOrCreateProject(existingProjects, resolved.projectPath)
+        if (nextProjects !== existingProjects) {
+          projects = nextProjects
+          await adapters.persistence.saveProjects(projects)
+        }
+
+        const session: Session = {
+          id: randomUUID(),
+          projectId: project.id,
+          worktreePath: resolved.cwd,
+          branch: resolved.branch,
+          baseRef: resolved.baseRef,
+          pid: resolved.pid,
+          status: resolved.status,
+          pendingPrompt: resolved.pendingPrompt
+        }
+        sessions = [...sessions, session]
+
+        return session
+      })
+    })
+
+    writeQueue = result.catch(() => {})
+    return result
+  }
+
   return {
     async ping() {
       const sessionCount = await adapters.persistence.loadSessionCount()
@@ -509,6 +565,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     setProjectMergeMode,
     requestMerge,
     discoverSessions,
-    discardWorktree
+    discardWorktree,
+    adoptSession
   }
 }

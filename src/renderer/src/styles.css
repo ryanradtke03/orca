@@ -187,6 +187,51 @@ button {
   color: var(--text-primary);
 }
 
+#adopt-section {
+  margin-top: 8px;
+}
+
+#adopt-session-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  font: 400 11.5px/1 var(--font-ui);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+#adopt-session-toggle:hover {
+  color: var(--text-primary);
+}
+
+.adopt-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.adopt-input {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-medium);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font: 400 11.5px/1 var(--font-ui);
+}
+
+.adopt-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.adopt-input::placeholder {
+  color: var(--text-faint);
+}
+
 #sidebar-status {
   margin: 0;
   padding: 10px 14px;

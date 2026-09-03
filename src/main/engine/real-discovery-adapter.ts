@@ -199,6 +199,29 @@ export function createRealDiscoveryAdapter(
       )
 
       return resolved.filter((entry): entry is DiscoveredSession => entry !== null)
+    },
+
+    async resolveManual(pid: number, directory: string): Promise<DiscoveredSession | null> {
+      let statuses: AgentStatusEntry[]
+      try {
+        statuses = await listAgentStatuses()
+      } catch {
+        return null
+      }
+
+      const entry = statuses.find((candidate) => candidate.pid === pid)
+      if (!entry || entry.id === undefined) return null
+
+      const projectPath = await resolveProjectPath(directory)
+      if (!projectPath) return null
+
+      const [branch, baseRef] = await Promise.all([resolveBranch(directory), resolveBaseRef(directory)])
+      const { status, promptType } = classify(entry)
+      const pendingPrompt = promptType
+        ? await resolvePendingPrompt(command, entry.id, promptType)
+        : undefined
+
+      return { pid, cwd: directory, projectPath, branch, baseRef, status, pendingPrompt }
     }
   }
 }

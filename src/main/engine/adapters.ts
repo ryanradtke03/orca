@@ -109,6 +109,13 @@ export interface DiscoveryAdapter {
   // already tracks it or not - the Engine is responsible for filtering out
   // ones it already knows about (see Engine.discoverSessions).
   scan(): Promise<DiscoveredSession[]>
+  // Resolves a single session the user has manually pointed Orca at by pid
+  // and working directory (Adopt) - for a session scan() can't find or fully
+  // resolve on its own, e.g. because it isn't listed by `claude agents`, or
+  // its transcript's cwd couldn't be read. Unlike scan(), which discovers cwd
+  // itself, the caller-supplied directory is authoritative here. Returns null
+  // when pid doesn't correspond to a running Claude Code session.
+  resolveManual(pid: number, directory: string): Promise<DiscoveredSession | null>
 }
 
 export interface EngineAdapters {
