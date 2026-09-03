@@ -1,6 +1,14 @@
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
-import type { FileDiff, PingResult, Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import type {
+  FileDiff,
+  MergeMode,
+  MergeResult,
+  PingResult,
+  Project,
+  Session,
+  SessionStatus
+} from '../../shared/ipc-contract'
 import type { EngineAdapters, WorktreeInfo } from './adapters'
 
 export interface Engine {
@@ -14,6 +22,8 @@ export interface Engine {
   stopSession(sessionId: string): Promise<Session>
   respondToPrompt(sessionId: string, response: string): Promise<Session>
   getDiff(sessionId: string): Promise<FileDiff[]>
+  setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
+  requestMerge(sessionId: string): Promise<MergeResult>
 }
 
 // Sessions whose process is still expected to be running; refreshSessionStatuses
@@ -52,7 +62,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
   function addProject(path: string): Promise<Project> {
     const result = writeQueue.then(async () => {
       const existing = await loadProjects()
-      const project: Project = { id: randomUUID(), path, name: basename(path) }
+      const project: Project = { id: randomUUID(), path, name: basename(path), mergeMode: 'manual' }
 
       projects = [...existing, project]
       await adapters.persistence.saveProjects(projects)
@@ -62,6 +72,64 @@ export function createEngine(adapters: EngineAdapters): Engine {
 
     writeQueue = result.catch(() => {})
     return result
+  }
+
+  function setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project> {
+    const result = writeQueue.then(async () => {
+      const existing = await loadProjects()
+      const index = existing.findIndex((candidate) => candidate.id === projectId)
+      if (index === -1) {
+        throw new Error(`Unknown project: ${projectId}`)
+      }
+
+      const updated: Project = { ...existing[index], mergeMode }
+      projects = existing.map((candidate, i) => (i === index ? updated : candidate))
+      await adapters.persistence.saveProjects(projects)
+
+      return updated
+    })
+
+    writeQueue = result.catch(() => {})
+    return result
+  }
+
+  async function requestMerge(sessionId: string): Promise<MergeResult> {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+
+    if (session.status !== 'done') {
+      throw new Error(`Session is not finished: ${sessionId}`)
+    }
+
+    const existing = await loadProjects()
+    const project = existing.find((candidate) => candidate.id === session.projectId)
+    if (!project) {
+      throw new Error(`Unknown project: ${session.projectId}`)
+    }
+
+    if (project.mergeMode === 'local-merge') {
+      await adapters.git.mergeWorktree({
+        projectPath: project.path,
+        worktreePath: session.worktreePath,
+        branch: session.branch
+      })
+      return { mergeMode: 'local-merge' }
+    }
+
+    if (project.mergeMode === 'pull-request') {
+      await adapters.git.pushBranch(session.worktreePath, session.branch)
+      const { url } = await adapters.github.openPullRequest({
+        projectPath: project.path,
+        branch: session.branch,
+        title: session.branch
+      })
+      return { mergeMode: 'pull-request', pullRequestUrl: url }
+    }
+
+    // Manual: the Diff stays visible for the user to merge themselves - no adapter call.
+    return { mergeMode: 'manual' }
   }
 
   async function spawnSession(projectId: string): Promise<Session> {
@@ -210,6 +278,8 @@ export function createEngine(adapters: EngineAdapters): Engine {
     refreshSessionStatuses,
     stopSession,
     respondToPrompt,
-    getDiff
+    getDiff,
+    setProjectMergeMode,
+    requestMerge
   }
 }

@@ -86,6 +86,24 @@ async function diffUntrackedFileTolerantly(worktreePath: string, relativePath: s
   }
 }
 
+// A Session's worktree can still hold uncommitted (even untracked) changes
+// when the user asks to merge - getDiff shows those alongside its committed
+// ones, so leaving them behind would silently merge/push less than what the
+// user actually reviewed.
+async function commitOutstandingChanges(worktreePath: string): Promise<void> {
+  const { stdout: statusOutput } = await execFileAsync('git', ['status', '--porcelain'], {
+    cwd: worktreePath
+  })
+  if (!statusOutput.trim()) return
+
+  await execFileAsync('git', ['add', '-A'], { cwd: worktreePath })
+  await execFileAsync(
+    'git',
+    ['commit', '-m', 'Orca: commit outstanding session changes before merge'],
+    { cwd: worktreePath }
+  )
+}
+
 export function createRealGitAdapter(worktreesRootDir: string): GitAdapter {
   return {
     async createWorktree(projectPath: string) {
@@ -131,6 +149,28 @@ export function createRealGitAdapter(worktreesRootDir: string): GitAdapter {
 
       const blocks = [trackedDiff, ...untrackedDiffs].map((block) => block.trim()).filter(Boolean)
       return parseUnifiedDiff(blocks.join('\n'))
+    },
+
+    async mergeWorktree({ projectPath, worktreePath, branch }) {
+      await commitOutstandingChanges(worktreePath)
+
+      // Runs against projectPath (the Project's own working directory, on
+      // whatever branch it currently has checked out), not the worktree -
+      // the worktree only ever holds the Session's own branch.
+      try {
+        await execFileAsync('git', ['merge', '--no-ff', branch], { cwd: projectPath })
+      } catch (error) {
+        // A conflicted merge leaves projectPath mid-merge (MERGE_HEAD set,
+        // conflicted files) - abort it so the Project's own checkout stays
+        // usable instead of silently stuck until the user notices.
+        await execFileAsync('git', ['merge', '--abort'], { cwd: projectPath }).catch(() => {})
+        throw error
+      }
+    },
+
+    async pushBranch(worktreePath: string, branch: string) {
+      await commitOutstandingChanges(worktreePath)
+      await execFileAsync('git', ['push', '-u', 'origin', branch], { cwd: worktreePath })
     }
   }
 }

@@ -1,4 +1,4 @@
-import type { Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import type { MergeMode, Project, Session, SessionStatus } from '../../shared/ipc-contract'
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   running: 'Running',
@@ -30,6 +30,24 @@ export function isAttentionStatus(status: SessionStatus): boolean {
 
 export function isTerminalStatus(status: SessionStatus): boolean {
   return status === 'done' || status === 'errored' || status === 'stopped'
+}
+
+// A finished (successfully done) Session is the only one offered for merge -
+// there's nothing worth integrating from one that was stopped or errored.
+export function isMergeable(status: SessionStatus): boolean {
+  return status === 'done'
+}
+
+export const MERGE_MODES: MergeMode[] = ['manual', 'local-merge', 'pull-request']
+
+const MERGE_MODE_LABELS: Record<MergeMode, string> = {
+  manual: 'Manual',
+  'local-merge': 'Local merge',
+  'pull-request': 'Pull request'
+}
+
+export function describeMergeMode(mergeMode: MergeMode): string {
+  return MERGE_MODE_LABELS[mergeMode]
 }
 
 type SummaryBucket = 'running' | 'waiting' | 'idle' | 'done' | 'errored' | 'stopped'

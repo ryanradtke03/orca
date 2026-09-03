@@ -2,9 +2,13 @@ import { readFile, writeFile } from 'fs/promises'
 import type { Project } from '../../shared/ipc-contract'
 import type { PersistenceAdapter } from './adapters'
 
+// mergeMode is optional here (unlike on Project) because a project persisted
+// before Merge mode existed has no such field on disk.
+type PersistedProject = Omit<Project, 'mergeMode'> & { mergeMode?: Project['mergeMode'] }
+
 interface PersistedState {
   sessionCount?: number
-  projects?: Project[]
+  projects?: PersistedProject[]
 }
 
 async function readState(stateFilePath: string): Promise<PersistedState> {
@@ -31,7 +35,9 @@ export function createRealPersistenceAdapter(stateFilePath: string): Persistence
     },
     async loadProjects() {
       const state = await readState(stateFilePath)
-      return Array.isArray(state.projects) ? state.projects : []
+      if (!Array.isArray(state.projects)) return []
+      // Projects persisted before Merge mode existed have no mergeMode field.
+      return state.projects.map((project) => ({ mergeMode: 'manual', ...project }))
     },
     async saveProjects(projects) {
       const state = await readState(stateFilePath)

@@ -3,10 +3,18 @@ export interface PingResult {
   sessionCount: number
 }
 
+export type MergeMode = 'manual' | 'local-merge' | 'pull-request'
+
 export interface Project {
   id: string
   path: string
   name: string
+  mergeMode: MergeMode
+}
+
+export interface MergeResult {
+  mergeMode: MergeMode
+  pullRequestUrl?: string
 }
 
 export type SessionStatus =
@@ -56,7 +64,9 @@ export const IPC_CHANNELS = {
   refreshSessionStatuses: 'session:refresh-statuses',
   stopSession: 'session:stop',
   respondToPrompt: 'session:respond-to-prompt',
-  getDiff: 'session:get-diff'
+  getDiff: 'session:get-diff',
+  setProjectMergeMode: 'project:set-merge-mode',
+  requestMerge: 'session:request-merge'
 } as const
 
 export interface OrcaApi {
@@ -69,4 +79,6 @@ export interface OrcaApi {
   stopSession(sessionId: string): Promise<Session>
   respondToPrompt(sessionId: string, response: string): Promise<Session>
   getDiff(sessionId: string): Promise<FileDiff[]>
+  setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
+  requestMerge(sessionId: string): Promise<MergeResult>
 }

@@ -450,6 +450,20 @@ button {
   font-size: 10.5px;
 }
 
+.merge-mode-select {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-medium);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font: 400 10.5px/1 var(--font-ui);
+}
+
+.merge-mode-select:hover {
+  color: var(--text-primary);
+}
+
 .session-table {
   margin-top: 8px;
   border-top: 1px solid var(--border-faint);
@@ -535,7 +549,8 @@ button {
 }
 
 .view-diff-button,
-.stop-session-button {
+.stop-session-button,
+.request-merge-button {
   background: none;
   border: none;
   padding: 0;
@@ -549,6 +564,10 @@ button {
 
 .stop-session-button:hover {
   color: var(--danger);
+}
+
+.request-merge-button:hover {
+  color: var(--accent);
 }
 
 /* Empty state */

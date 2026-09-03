@@ -1,6 +1,7 @@
 import type { FileDiff } from '../shared/ipc-contract'
 import { createEngine, type Engine } from './engine/engine'
 import { createFakeGitAdapter, type FakeGitAdapter } from './engine/fake-git-adapter'
+import { createFakeGitHubAdapter } from './engine/fake-github-adapter'
 import { createFakeNotificationAdapter } from './engine/fake-notification-adapter'
 import { createFakePersistenceAdapter } from './engine/fake-persistence-adapter'
 import { createFakeProcessAdapter, type FakeProcessAdapter } from './engine/fake-process-adapter'
@@ -121,13 +122,16 @@ async function seedDemoData(
  */
 export function createDemoEngine(): Engine {
   const persistence = createFakePersistenceAdapter({
-    projects: [{ id: DEMO_PROJECT_ID, path: '/demo/orca', name: 'orca (demo)' }]
+    projects: [
+      { id: DEMO_PROJECT_ID, path: '/demo/orca', name: 'orca (demo)', mergeMode: 'manual' }
+    ]
   })
   const git = createFakeGitAdapter()
   const processAdapter = createFakeProcessAdapter()
   const notification = createFakeNotificationAdapter()
+  const github = createFakeGitHubAdapter()
 
-  const engine = createEngine({ persistence, git, process: processAdapter, notification })
+  const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
   void seedDemoData(engine, git, processAdapter)
 
   return engine

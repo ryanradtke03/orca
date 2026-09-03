@@ -54,7 +54,7 @@ describe('createRealPersistenceAdapter', () => {
   it('reads back projects that were saved', async () => {
     const stateFilePath = join(dir, 'state.json')
     const adapter = createRealPersistenceAdapter(stateFilePath)
-    const projects = [{ id: '1', path: '/tmp/foo', name: 'foo' }]
+    const projects = [{ id: '1', path: '/tmp/foo', name: 'foo', mergeMode: 'manual' as const }]
 
     await adapter.saveProjects(projects)
 
@@ -63,7 +63,7 @@ describe('createRealPersistenceAdapter', () => {
 
   it('persists projects across separate adapter instances backed by the same file', async () => {
     const stateFilePath = join(dir, 'state.json')
-    const projects = [{ id: '1', path: '/tmp/foo', name: 'foo' }]
+    const projects = [{ id: '1', path: '/tmp/foo', name: 'foo', mergeMode: 'manual' as const }]
 
     await createRealPersistenceAdapter(stateFilePath).saveProjects(projects)
 
@@ -72,12 +72,25 @@ describe('createRealPersistenceAdapter', () => {
     )
   })
 
+  it('defaults mergeMode to Manual for a project persisted before Merge mode existed', async () => {
+    const stateFilePath = join(dir, 'state.json')
+    await writeFile(
+      stateFilePath,
+      JSON.stringify({ projects: [{ id: '1', path: '/tmp/foo', name: 'foo' }] })
+    )
+    const adapter = createRealPersistenceAdapter(stateFilePath)
+
+    await expect(adapter.loadProjects()).resolves.toEqual([
+      { id: '1', path: '/tmp/foo', name: 'foo', mergeMode: 'manual' }
+    ])
+  })
+
   it('saving projects does not clobber a previously persisted session count', async () => {
     const stateFilePath = join(dir, 'state.json')
     await writeFile(stateFilePath, JSON.stringify({ sessionCount: 5 }))
     const adapter = createRealPersistenceAdapter(stateFilePath)
 
-    await adapter.saveProjects([{ id: '1', path: '/tmp/foo', name: 'foo' }])
+    await adapter.saveProjects([{ id: '1', path: '/tmp/foo', name: 'foo', mergeMode: 'manual' }])
 
     await expect(adapter.loadSessionCount()).resolves.toBe(5)
   })

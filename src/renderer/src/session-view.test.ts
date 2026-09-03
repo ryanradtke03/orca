@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, Session } from '../../shared/ipc-contract'
 import {
+  describeMergeMode,
   describeStatus,
   groupSessionsByProject,
   isAttentionStatus,
+  isMergeable,
   isStoppable,
   isTerminalStatus,
+  MERGE_MODES,
   needsAttentionSessions,
   summarizeStatuses
 } from './session-view'
@@ -64,8 +67,8 @@ describe('summarizeStatuses', () => {
 
 describe('groupSessionsByProject', () => {
   const projects: Project[] = [
-    { id: 'p1', path: '/code/p1', name: 'orca' },
-    { id: 'p2', path: '/code/p2', name: 'atlas-api' }
+    { id: 'p1', path: '/code/p1', name: 'orca', mergeMode: 'manual' },
+    { id: 'p2', path: '/code/p2', name: 'atlas-api', mergeMode: 'manual' }
   ]
 
   it('returns one group per project, in project order, even with no sessions', () => {
@@ -119,6 +122,32 @@ describe('isTerminalStatus', () => {
     expect(isTerminalStatus('waiting-on-permission')).toBe(false)
     expect(isTerminalStatus('waiting-on-input')).toBe(false)
     expect(isTerminalStatus('idle')).toBe(false)
+  })
+})
+
+describe('isMergeable', () => {
+  it('is true only for done', () => {
+    expect(isMergeable('done')).toBe(true)
+    expect(isMergeable('errored')).toBe(false)
+    expect(isMergeable('stopped')).toBe(false)
+    expect(isMergeable('running')).toBe(false)
+    expect(isMergeable('waiting-on-permission')).toBe(false)
+    expect(isMergeable('waiting-on-input')).toBe(false)
+    expect(isMergeable('idle')).toBe(false)
+  })
+})
+
+describe('describeMergeMode', () => {
+  it('labels each merge mode', () => {
+    expect(describeMergeMode('manual')).toBe('Manual')
+    expect(describeMergeMode('local-merge')).toBe('Local merge')
+    expect(describeMergeMode('pull-request')).toBe('Pull request')
+  })
+
+  it('has a label for every mode in MERGE_MODES', () => {
+    for (const mode of MERGE_MODES) {
+      expect(describeMergeMode(mode)).toEqual(expect.any(String))
+    }
   })
 })
 

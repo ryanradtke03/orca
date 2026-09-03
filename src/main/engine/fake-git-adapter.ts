@@ -3,6 +3,8 @@ import type { FileDiff, GitAdapter } from './adapters'
 export interface FakeGitAdapter extends GitAdapter {
   getDiffCalls: { worktreePath: string; baseRef: string }[]
   removeWorktreeCalls: { projectPath: string; worktreePath: string }[]
+  mergeWorktreeCalls: { projectPath: string; worktreePath: string; branch: string }[]
+  pushBranchCalls: { worktreePath: string; branch: string }[]
   simulateDiff(worktreePath: string, files: FileDiff[]): void
 }
 
@@ -11,10 +13,14 @@ export function createFakeGitAdapter(seed: { branch?: string } = {}): FakeGitAda
   const diffsByWorktree = new Map<string, FileDiff[]>()
   const getDiffCalls: { worktreePath: string; baseRef: string }[] = []
   const removeWorktreeCalls: { projectPath: string; worktreePath: string }[] = []
+  const mergeWorktreeCalls: { projectPath: string; worktreePath: string; branch: string }[] = []
+  const pushBranchCalls: { worktreePath: string; branch: string }[] = []
 
   return {
     getDiffCalls,
     removeWorktreeCalls,
+    mergeWorktreeCalls,
+    pushBranchCalls,
 
     async createWorktree(projectPath: string) {
       counter += 1
@@ -32,6 +38,14 @@ export function createFakeGitAdapter(seed: { branch?: string } = {}): FakeGitAda
     async getDiff(worktreePath: string, baseRef: string) {
       getDiffCalls.push({ worktreePath, baseRef })
       return diffsByWorktree.get(worktreePath) ?? []
+    },
+
+    async mergeWorktree(params: { projectPath: string; worktreePath: string; branch: string }) {
+      mergeWorktreeCalls.push(params)
+    },
+
+    async pushBranch(worktreePath: string, branch: string) {
+      pushBranchCalls.push({ worktreePath, branch })
     },
 
     simulateDiff(worktreePath: string, files: FileDiff[]): void {

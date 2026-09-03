@@ -1,6 +1,13 @@
 import type { FileDiff, PendingPrompt, Project } from '../../shared/ipc-contract'
 
-export type { FileDiff, FileDiffStatus, PendingPrompt, PendingPromptType } from '../../shared/ipc-contract'
+export type {
+  FileDiff,
+  FileDiffStatus,
+  MergeMode,
+  MergeResult,
+  PendingPrompt,
+  PendingPromptType
+} from '../../shared/ipc-contract'
 
 export interface PersistenceAdapter {
   loadSessionCount(): Promise<number>
@@ -20,6 +27,26 @@ export interface GitAdapter {
   createWorktree(projectPath: string): Promise<WorktreeInfo>
   removeWorktree(projectPath: string, worktreePath: string): Promise<void>
   getDiff(worktreePath: string, baseRef: string): Promise<FileDiff[]>
+  // Commits any changes still uncommitted in the worktree (the Diff shows
+  // those too, so leaving them behind would merge less than the user
+  // reviewed), then merges the branch back into whatever's checked out at
+  // projectPath.
+  mergeWorktree(params: { projectPath: string; worktreePath: string; branch: string }): Promise<void>
+  // Commits any changes still uncommitted in the worktree, then pushes the
+  // branch to its remote so a pull request can be opened from it.
+  pushBranch(worktreePath: string, branch: string): Promise<void>
+}
+
+export interface PullRequestInfo {
+  url: string
+}
+
+export interface GitHubAdapter {
+  openPullRequest(params: {
+    projectPath: string
+    branch: string
+    title: string
+  }): Promise<PullRequestInfo>
 }
 
 export interface ProcessInfo {
@@ -52,4 +79,5 @@ export interface EngineAdapters {
   git: GitAdapter
   process: ProcessAdapter
   notification: NotificationAdapter
+  github: GitHubAdapter
 }

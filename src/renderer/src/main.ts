@@ -1,14 +1,17 @@
 import { resolvePermissionResponses } from '../../shared/prompt-options'
-import type { PendingPrompt, Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import type { MergeMode, PendingPrompt, Project, Session, SessionStatus } from '../../shared/ipc-contract'
 import { renderDiffLoadError, renderDiffLoading, renderDiffScreen } from './diff-view'
 import { el } from './dom'
 import {
+  describeMergeMode,
   describeStatus,
   groupSessionsByProject,
   isAttentionStatus,
+  isMergeable,
   isStoppable,
   isTerminalStatus,
   needsAttentionSessions,
+  MERGE_MODES,
   summarizeStatuses,
   type ProjectSessionGroup
 } from './session-view'
@@ -72,6 +75,15 @@ function renderSessionRow(session: Session): HTMLElement {
     })
     stopButton.dataset.sessionId = session.id
     action.append(stopButton)
+  }
+  if (isMergeable(session.status)) {
+    const mergeButton = el('button', {
+      type: 'button',
+      className: 'request-merge-button',
+      textContent: 'Request merge'
+    })
+    mergeButton.dataset.sessionId = session.id
+    action.append(mergeButton)
   }
 
   row.append(marker, branch, statusLabel, action)
@@ -170,6 +182,20 @@ function renderProjectGroup(group: ProjectSessionGroup): DocumentFragment {
     el('span', { className: 'path', textContent: group.project.path }),
     el('div', { className: 'rule' })
   ])
+  const mergeModeSelect = el(
+    'select',
+    { className: 'merge-mode-select' },
+    MERGE_MODES.map((mode) =>
+      el('option', {
+        value: mode,
+        textContent: describeMergeMode(mode),
+        selected: mode === group.project.mergeMode
+      })
+    )
+  )
+  mergeModeSelect.dataset.projectId = group.project.id
+  header.append(mergeModeSelect)
+
   const newSessionButton = el('button', { type: 'button', className: 'btn new-session-button', textContent: 'New session' })
   newSessionButton.dataset.projectId = group.project.id
   header.append(newSessionButton)
@@ -470,6 +496,30 @@ async function handleRespondToPrompt(sessionId: string, response: string): Promi
   }
 }
 
+async function handleSetProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<void> {
+  try {
+    await window.orca.setProjectMergeMode(projectId, mergeMode)
+    await refreshAll()
+  } catch (error) {
+    setStatus(`Failed to set merge mode: ${describeError(error)}`)
+  }
+}
+
+async function handleRequestMerge(sessionId: string): Promise<void> {
+  try {
+    const result = await window.orca.requestMerge(sessionId)
+    if (result.mergeMode === 'pull-request') {
+      setStatus(`Opened pull request: ${result.pullRequestUrl ?? ''}`)
+    } else if (result.mergeMode === 'local-merge') {
+      setStatus('Merged into the main branch.')
+    } else {
+      setStatus('Merge mode is Manual — merge the Diff yourself.')
+    }
+  } catch (error) {
+    setStatus(`Failed to request merge: ${describeError(error)}`)
+  }
+}
+
 function scrollToId(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
@@ -528,7 +578,23 @@ function handleAppClick(event: Event): void {
   const promptActionButton = target.closest<HTMLButtonElement>('.approve-prompt-button, .deny-prompt-button')
   if (promptActionButton?.dataset.sessionId && promptActionButton.dataset.response) {
     void handleRespondToPrompt(promptActionButton.dataset.sessionId, promptActionButton.dataset.response)
+    return
   }
+
+  const requestMergeButton = target.closest<HTMLButtonElement>('.request-merge-button')
+  if (requestMergeButton?.dataset.sessionId) {
+    void handleRequestMerge(requestMergeButton.dataset.sessionId)
+  }
+}
+
+function handleAppChange(event: Event): void {
+  const target = event.target
+  if (!(target instanceof HTMLSelectElement) || !target.classList.contains('merge-mode-select')) return
+
+  const projectId = target.dataset.projectId
+  if (!projectId) return
+
+  void handleSetProjectMergeMode(projectId, target.value as MergeMode)
 }
 
 function handleAppSubmit(event: Event): void {
@@ -553,6 +619,7 @@ function handleAppSubmit(event: Event): void {
 async function main(): Promise<void> {
   app?.addEventListener('click', handleAppClick)
   app?.addEventListener('submit', handleAppSubmit)
+  app?.addEventListener('change', handleAppChange)
 
   await refreshAll()
 

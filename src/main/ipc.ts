@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import type { Engine } from './engine/engine'
-import { IPC_CHANNELS } from '../shared/ipc-contract'
+import { IPC_CHANNELS, type MergeMode } from '../shared/ipc-contract'
 
 export function registerIpcHandlers(engine: Engine): void {
   ipcMain.handle(IPC_CHANNELS.ping, () => engine.ping())
@@ -36,4 +36,14 @@ export function registerIpcHandlers(engine: Engine): void {
   )
 
   ipcMain.handle(IPC_CHANNELS.getDiff, (_event, sessionId: string) => engine.getDiff(sessionId))
+
+  ipcMain.handle(
+    IPC_CHANNELS.setProjectMergeMode,
+    (_event, projectId: string, mergeMode: MergeMode) =>
+      engine.setProjectMergeMode(projectId, mergeMode)
+  )
+
+  ipcMain.handle(IPC_CHANNELS.requestMerge, (_event, sessionId: string) =>
+    engine.requestMerge(sessionId)
+  )
 }

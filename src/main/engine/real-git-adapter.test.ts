@@ -154,4 +154,97 @@ describe('createRealGitAdapter', () => {
       expect(files).toEqual([])
     })
   })
+
+  describe('mergeWorktree', () => {
+    it("merges the worktree branch's commits into the project's checked-out branch", async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, branch } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'new-file.txt'), 'from the session')
+      await execFileAsync('git', ['add', '.'], { cwd: worktreePath })
+      await execFileAsync('git', ['commit', '-m', 'session change'], { cwd: worktreePath })
+
+      await adapter.mergeWorktree({ projectPath, worktreePath, branch })
+
+      expect(existsSync(join(projectPath, 'new-file.txt'))).toBe(true)
+    })
+
+    it('commits uncommitted worktree changes before merging them in, so nothing the Diff showed is left behind', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, branch } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'untracked.txt'), 'uncommitted work')
+
+      await adapter.mergeWorktree({ projectPath, worktreePath, branch })
+
+      expect(existsSync(join(projectPath, 'untracked.txt'))).toBe(true)
+    })
+
+    it('rejects when the branch conflicts with the project branch', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, branch } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'README.md'), 'from the session')
+      await execFileAsync('git', ['add', '.'], { cwd: worktreePath })
+      await execFileAsync('git', ['commit', '-m', 'session change'], { cwd: worktreePath })
+      await writeFile(join(projectPath, 'README.md'), 'from the project, conflicting')
+      await execFileAsync('git', ['add', '.'], { cwd: projectPath })
+      await execFileAsync('git', ['commit', '-m', 'conflicting project change'], { cwd: projectPath })
+
+      await expect(adapter.mergeWorktree({ projectPath, worktreePath, branch })).rejects.toThrow()
+    })
+
+    it('leaves the project checkout clean (no in-progress merge) after a conflicting merge fails', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, branch } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'README.md'), 'from the session')
+      await execFileAsync('git', ['add', '.'], { cwd: worktreePath })
+      await execFileAsync('git', ['commit', '-m', 'session change'], { cwd: worktreePath })
+      await writeFile(join(projectPath, 'README.md'), 'from the project, conflicting')
+      await execFileAsync('git', ['add', '.'], { cwd: projectPath })
+      await execFileAsync('git', ['commit', '-m', 'conflicting project change'], { cwd: projectPath })
+
+      await expect(adapter.mergeWorktree({ projectPath, worktreePath, branch })).rejects.toThrow()
+
+      expect(existsSync(join(projectPath, '.git', 'MERGE_HEAD'))).toBe(false)
+      const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: projectPath })
+      expect(stdout.trim()).toBe('')
+    })
+  })
+
+  describe('pushBranch', () => {
+    let remotePath: string
+
+    beforeEach(async () => {
+      remotePath = await mkdtemp(join(tmpdir(), 'orca-remote-'))
+      await execFileAsync('git', ['init', '--bare'], { cwd: remotePath })
+      await execFileAsync('git', ['remote', 'add', 'origin', remotePath], { cwd: projectPath })
+      await execFileAsync('git', ['push', 'origin', 'HEAD:refs/heads/main'], { cwd: projectPath })
+    })
+
+    afterEach(async () => {
+      await rm(remotePath, { recursive: true, force: true })
+    })
+
+    it('pushes the branch to the remote', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, branch } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'new-file.txt'), 'from the session')
+      await execFileAsync('git', ['add', '.'], { cwd: worktreePath })
+      await execFileAsync('git', ['commit', '-m', 'session change'], { cwd: worktreePath })
+
+      await adapter.pushBranch(worktreePath, branch)
+
+      const { stdout } = await execFileAsync('git', ['branch', '-r'], { cwd: projectPath })
+      expect(stdout).toContain(`origin/${branch}`)
+    })
+
+    it('commits uncommitted worktree changes before pushing, so nothing the Diff showed is left behind', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, branch } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'untracked.txt'), 'uncommitted work')
+
+      await adapter.pushBranch(worktreePath, branch)
+
+      const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: worktreePath })
+      expect(stdout.trim()).toBe('')
+    })
+  })
 })
