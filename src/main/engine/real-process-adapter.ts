@@ -182,6 +182,18 @@ export function createRealProcessAdapter(
       return sessions.get(pid)?.pendingPrompt ?? null
     },
 
+    async registerAlive(pid: number): Promise<void> {
+      if (sessions.get(pid)?.alive) return
+
+      const statuses = await listAgentStatuses()
+      const entry = statuses.find((candidate) => candidate.pid === pid)
+      if (!entry || entry.id === undefined) {
+        throw new Error(`No running Claude Code session found for pid ${pid}`)
+      }
+
+      sessions.set(pid, { id: entry.id, pid, alive: true, exitCode: null, pendingPrompt: null })
+    },
+
     async respond(pid: number, response: string): Promise<void> {
       const tracked = sessions.get(pid)
       if (!tracked || !tracked.alive) return

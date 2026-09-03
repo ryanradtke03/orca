@@ -204,4 +204,57 @@ describe('createRealDiscoveryAdapter', () => {
 
     await expect(adapter.scan()).resolves.toEqual([])
   })
+
+  describe('resolveManual', () => {
+    it('resolves a session by pid using the caller-supplied directory, no transcript required', async () => {
+      const listAgentStatuses = async (): Promise<AgentStatusEntry[]> => [
+        { id: 'session-1', pid: 4242, status: 'busy' }
+      ]
+      const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
+
+      const resolved = await adapter.resolveManual(4242, projectPath)
+
+      expect(resolved).toEqual({
+        pid: 4242,
+        cwd: projectPath,
+        projectPath: await realpath(projectPath),
+        branch: expect.any(String),
+        baseRef: expect.any(String),
+        status: 'running',
+        pendingPrompt: undefined
+      })
+    })
+
+    it('returns null when no running session has that pid', async () => {
+      const listAgentStatuses = async (): Promise<AgentStatusEntry[]> => [
+        { id: 'session-1', pid: 4242, status: 'busy' }
+      ]
+      const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
+
+      await expect(adapter.resolveManual(9999, projectPath)).resolves.toBeNull()
+    })
+
+    it('returns null when the given directory is not inside a git repository', async () => {
+      const bareDir = await mkdtemp(join(tmpdir(), 'orca-non-git-'))
+      try {
+        const listAgentStatuses = async (): Promise<AgentStatusEntry[]> => [
+          { id: 'session-1', pid: 4242, status: 'busy' }
+        ]
+        const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
+
+        await expect(adapter.resolveManual(4242, bareDir)).resolves.toBeNull()
+      } finally {
+        await rm(bareDir, { recursive: true, force: true })
+      }
+    })
+
+    it('returns null rather than throwing when listing agent statuses fails', async () => {
+      const listAgentStatuses = async (): Promise<AgentStatusEntry[]> => {
+        throw new Error('simulated transient failure')
+      }
+      const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
+
+      await expect(adapter.resolveManual(4242, projectPath)).resolves.toBeNull()
+    })
+  })
 })

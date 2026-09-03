@@ -1,3 +1,4 @@
+import { spawn } from 'child_process'
 import { readFileSync, writeFileSync } from 'fs'
 import { mkdtemp, realpath, rm } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -124,6 +125,34 @@ describe('createRealProcessAdapter', () => {
     const adapter = createRealProcessAdapter(FAKE_CLI)
 
     await expect(adapter.stop(999_999)).resolves.toBeUndefined()
+  })
+
+  it('registers a pid it never spawned as alive, once the CLI confirms it is running', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+    // Simulates a session Discovery/Adopt found via `claude agents`, without
+    // ever going through this adapter's own spawnClaude - a real (but
+    // otherwise unmanaged) process, since the fake CLI's own `agents`
+    // listing reports a pid as crashed/done unless the OS confirms it alive.
+    const external = spawn(process.execPath, [FAKE_CLI, '--worker'], { detached: true, stdio: 'ignore' })
+    external.unref()
+    const externalPid = external.pid
+    if (externalPid === undefined) throw new Error('failed to spawn external worker process')
+    writeEntries([
+      { id: 'external-session', pid: externalPid, cwd: dir, status: 'busy', processState: 'blocked', screen: '' }
+    ])
+    expect(adapter.isAlive(externalPid)).toBe(false)
+
+    await adapter.registerAlive(externalPid)
+
+    expect(adapter.isAlive(externalPid)).toBe(true)
+    expect(adapter.exitCode(externalPid)).toBeNull()
+  })
+
+  it('rejects registering a pid the CLI does not report as running', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+
+    await expect(adapter.registerAlive(999_999)).rejects.toThrow()
+    expect(adapter.isAlive(999_999)).toBe(false)
   })
 
   it('reports no pending prompt while the session is idle', async () => {

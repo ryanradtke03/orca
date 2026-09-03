@@ -68,6 +68,12 @@ export interface ProcessAdapter {
   exitCode(pid: number): number | null
   pendingPrompt(pid: number): PendingPrompt | null
   respond(pid: number, response: string): Promise<void>
+  // Registers a pid this adapter didn't spawn itself - found running
+  // independently via Discovery or a manual Adopt - so isAlive/exitCode/
+  // pendingPrompt track it from here on exactly like a spawned session's.
+  // Rejects if pid doesn't correspond to a session this adapter can confirm
+  // is actually running.
+  registerAlive(pid: number): Promise<void>
 }
 
 export type NotificationUrgency = 'critical' | 'low'
@@ -109,6 +115,13 @@ export interface DiscoveryAdapter {
   // already tracks it or not - the Engine is responsible for filtering out
   // ones it already knows about (see Engine.discoverSessions).
   scan(): Promise<DiscoveredSession[]>
+  // Resolves a single session the user has manually pointed Orca at by pid
+  // and working directory (Adopt) - for a session scan() can't find or fully
+  // resolve on its own, e.g. because it isn't listed by `claude agents`, or
+  // its transcript's cwd couldn't be read. Unlike scan(), which discovers cwd
+  // itself, the caller-supplied directory is authoritative here. Returns null
+  // when pid doesn't correspond to a running Claude Code session.
+  resolveManual(pid: number, directory: string): Promise<DiscoveredSession | null>
 }
 
 export interface EngineAdapters {

@@ -58,6 +58,10 @@ export function createFakeProcessAdapter(seed: { pid?: number } = {}): FakeProce
       process.pendingPrompt = prompt
     },
 
+    async registerAlive(pid: number): Promise<void> {
+      processes.set(pid, { alive: true, exitCode: null, pendingPrompt: null })
+    },
+
     async respond(pid: number, text: string): Promise<void> {
       responses.push({ pid, text })
       const process = processes.get(pid)

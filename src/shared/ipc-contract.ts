@@ -74,7 +74,8 @@ export const IPC_CHANNELS = {
   getDiff: 'session:get-diff',
   setProjectMergeMode: 'project:set-merge-mode',
   requestMerge: 'session:request-merge',
-  discardWorktree: 'session:discard-worktree'
+  discardWorktree: 'session:discard-worktree',
+  adoptSession: 'session:adopt'
 } as const
 
 export interface OrcaApi {
@@ -90,4 +91,5 @@ export interface OrcaApi {
   setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
   requestMerge(sessionId: string): Promise<MergeResult>
   discardWorktree(sessionId: string): Promise<Session>
+  adoptSession(pid: number, directory: string): Promise<Session>
 }

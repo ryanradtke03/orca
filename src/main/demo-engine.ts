@@ -2,12 +2,34 @@ import type { FileDiff } from '../shared/ipc-contract'
 import { createEngine, type Engine } from './engine/engine'
 import { createFakeDiscoveryAdapter } from './engine/fake-discovery-adapter'
 import { createFakeGitAdapter, type FakeGitAdapter } from './engine/fake-git-adapter'
-import { createFakeGitHubAdapter } from './engine/fake-github-adapter'
+import { createFakeGitHubAdapter, type FakeGitHubAdapter } from './engine/fake-github-adapter'
 import { createFakeNotificationAdapter } from './engine/fake-notification-adapter'
 import { createFakePersistenceAdapter } from './engine/fake-persistence-adapter'
 import { createFakeProcessAdapter, type FakeProcessAdapter } from './engine/fake-process-adapter'
 
 const DEMO_PROJECT_ID = 'demo-project'
+const LOCAL_MERGE_PROJECT_ID = 'demo-project-local-merge'
+const PULL_REQUEST_PROJECT_ID = 'demo-project-pull-request'
+
+// Path/pid for the #9 "discovered" session - never created via spawnSession,
+// so its Project only exists because discoverSessions() creates one on the
+// fly for a path it doesn't recognize. Kept 'running' (and registered alive
+// on the fake Process adapter below) rather than a terminal status: since
+// 'running' is in ACTIVE_STATUSES, discoverSessions() treats it as already
+// tracked on every later scan and never re-adds a duplicate - a terminal
+// status would need an extra mechanism to stop scan() reporting it once
+// discovered, racing whenever that actually happens.
+const DISCOVERED_PROJECT_PATH = '/demo/orca-scratch'
+const DISCOVERED_PID = 9999
+
+// Path/pid for the #10 "adoptable" session - deliberately absent from
+// scan() (see simulateManualOnlySession below), the same way a session
+// Discovery's periodic scan can't find on its own would be. To see the
+// Adopt flow, use the sidebar's "Adopt session…" form with this PID and
+// directory - a new Project/Session for it appears the same way a real
+// Adopt would resolve one.
+const ADOPTABLE_PROJECT_PATH = '/demo/orca-unclaimed'
+const ADOPTABLE_PID = 8888
 
 const SMALL_DIFF: FileDiff[] = [
   {
@@ -98,7 +120,8 @@ const DEMO_PERMISSION_PROMPT_TEXT = [
 async function seedDemoData(
   engine: Engine,
   git: FakeGitAdapter,
-  processAdapter: FakeProcessAdapter
+  processAdapter: FakeProcessAdapter,
+  github: FakeGitHubAdapter
 ): Promise<void> {
   const running = await engine.spawnSession(DEMO_PROJECT_ID)
   git.simulateDiff(running.worktreePath, SMALL_DIFF)
@@ -111,7 +134,29 @@ async function seedDemoData(
   git.simulateDiff(finished.worktreePath, RICH_DIFF)
   processAdapter.simulateExit(finished.pid, 0)
 
+  // Local merge (#33): "Request merge" reclaims the worktree the moment the
+  // branch is integrated - nothing left in it is worth reviewing.
+  const readyToMerge = await engine.spawnSession(LOCAL_MERGE_PROJECT_ID)
+  git.simulateDiff(readyToMerge.worktreePath, SMALL_DIFF)
+  processAdapter.simulateExit(readyToMerge.pid, 0)
+
+  // Pull request (#33): "Request merge" opens a PR and leaves the worktree in
+  // place, since opening a PR doesn't integrate the branch.
+  const awaitingReview = await engine.spawnSession(PULL_REQUEST_PROJECT_ID)
+  git.simulateDiff(awaitingReview.worktreePath, RICH_DIFF)
+  processAdapter.simulateExit(awaitingReview.pid, 0)
+
+  // A second Pull request Session whose PR is opened up front and already
+  // shows merged on GitHub's side, so the app's own status-poll loop
+  // reclaims its worktree live, the same way it would once a real PR lands.
+  const alreadyApproved = await engine.spawnSession(PULL_REQUEST_PROJECT_ID)
+  git.simulateDiff(alreadyApproved.worktreePath, SMALL_DIFF)
+  processAdapter.simulateExit(alreadyApproved.pid, 0)
+
   await engine.refreshSessionStatuses()
+
+  const { pullRequestUrl } = await engine.requestMerge(alreadyApproved.id)
+  if (pullRequestUrl) github.simulateMerged(pullRequestUrl)
 }
 
 /**
@@ -124,19 +169,59 @@ async function seedDemoData(
 export function createDemoEngine(): Engine {
   const persistence = createFakePersistenceAdapter({
     projects: [
-      { id: DEMO_PROJECT_ID, path: '/demo/orca', name: 'orca (demo)', mergeMode: 'manual' }
+      { id: DEMO_PROJECT_ID, path: '/demo/orca', name: 'orca (demo)', mergeMode: 'manual' },
+      {
+        id: LOCAL_MERGE_PROJECT_ID,
+        path: '/demo/orca-docs',
+        name: 'orca-docs (demo)',
+        mergeMode: 'local-merge'
+      },
+      {
+        id: PULL_REQUEST_PROJECT_ID,
+        path: '/demo/orca-api',
+        name: 'orca-api (demo)',
+        mergeMode: 'pull-request'
+      }
     ]
   })
   const git = createFakeGitAdapter()
   const processAdapter = createFakeProcessAdapter()
   const notification = createFakeNotificationAdapter()
   const github = createFakeGitHubAdapter()
-  // No externally-started sessions to discover in the demo - it's seeded
-  // entirely through spawnSession below.
-  const discovery = createFakeDiscoveryAdapter()
+  // Seeded (rather than added via seedDemoData below) so it's already
+  // present for index.ts's launch-time discoverSessions() call, which races
+  // the rest of this function's async setup.
+  const discovery = createFakeDiscoveryAdapter({
+    sessions: [
+      {
+        pid: DISCOVERED_PID,
+        cwd: DISCOVERED_PROJECT_PATH,
+        projectPath: DISCOVERED_PROJECT_PATH,
+        branch: 'scratch/quick-fix',
+        baseRef: 'base-scratch',
+        status: 'running'
+      }
+    ]
+  })
+  processAdapter.registerAlive(DISCOVERED_PID)
+  git.simulateDiff(DISCOVERED_PROJECT_PATH, SMALL_DIFF)
+
+  // Only resolveManual() can find this one - scan() never reports it, so it
+  // stays absent from the sidebar until the user adopts it themselves.
+  discovery.simulateManualOnlySession({
+    pid: ADOPTABLE_PID,
+    cwd: ADOPTABLE_PROJECT_PATH,
+    projectPath: ADOPTABLE_PROJECT_PATH,
+    branch: 'manual/fix-flaky-test',
+    baseRef: 'base-manual',
+    status: 'idle'
+  })
+  git.simulateDiff(ADOPTABLE_PROJECT_PATH, SMALL_DIFF)
 
   const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
-  void seedDemoData(engine, git, processAdapter)
+  void seedDemoData(engine, git, processAdapter, github).catch((error) => {
+    console.error('Failed to seed demo data:', error)
+  })
 
   return engine
 }
