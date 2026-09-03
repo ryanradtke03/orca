@@ -57,4 +57,35 @@ describe('createRealGitAdapter', () => {
     expect(existsSync(first.worktreePath)).toBe(true)
     expect(existsSync(second.worktreePath)).toBe(true)
   })
+
+  describe('removeWorktree', () => {
+    it('removes a clean worktree from disk', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath } = await adapter.createWorktree(projectPath)
+
+      await adapter.removeWorktree(projectPath, worktreePath)
+
+      expect(existsSync(worktreePath)).toBe(false)
+    })
+
+    it('drops the worktree from `git worktree list`', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath } = await adapter.createWorktree(projectPath)
+
+      await adapter.removeWorktree(projectPath, worktreePath)
+
+      const { stdout } = await execFileAsync('git', ['worktree', 'list'], { cwd: projectPath })
+      expect(stdout).not.toContain(worktreePath)
+    })
+
+    it('rejects, leaving the worktree in place, when it has uncommitted changes', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'untracked.txt'), 'work in progress')
+
+      await expect(adapter.removeWorktree(projectPath, worktreePath)).rejects.toThrow()
+
+      expect(existsSync(worktreePath)).toBe(true)
+    })
+  })
 })

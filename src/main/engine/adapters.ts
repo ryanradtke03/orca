@@ -15,6 +15,7 @@ export interface WorktreeInfo {
 
 export interface GitAdapter {
   createWorktree(projectPath: string): Promise<WorktreeInfo>
+  removeWorktree(projectPath: string, worktreePath: string): Promise<void>
 }
 
 export interface ProcessInfo {

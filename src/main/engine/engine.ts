@@ -29,6 +29,21 @@ export function createEngine(adapters: EngineAdapters): Engine {
   // Serializes addProject calls, and reads that must not observe a write mid-flight,
   // so a concurrent read-modify-write can't drop a write or return a stale project list.
   let writeQueue: Promise<unknown> = Promise.resolve()
+  // Serializes every read-modify-write of `sessions` (spawn/stop/respond/refresh).
+  // refreshSessionStatuses now awaits cleanupWorktree per session before it
+  // reassigns the whole array - without this queue, a stopSession/respondToPrompt
+  // that completes during that await would have its update silently overwritten
+  // by refresh's stale, pre-await snapshot of the other sessions.
+  let sessionsQueue: Promise<unknown> = Promise.resolve()
+
+  function serializeSessionWrite<T>(fn: () => Promise<T>): Promise<T> {
+    const result = sessionsQueue.then(fn)
+    sessionsQueue = result.then(
+      () => {},
+      () => {}
+    )
+    return result
+  }
 
   async function loadProjects(): Promise<Project[]> {
     if (!projects) {
@@ -52,6 +67,24 @@ export function createEngine(adapters: EngineAdapters): Engine {
     return result
   }
 
+  async function cleanupWorktree(session: Session): Promise<void> {
+    const existing = await loadProjects()
+    const project = existing.find((candidate) => candidate.id === session.projectId)
+    if (!project) return
+
+    try {
+      await adapters.git.removeWorktree(project.path, session.worktreePath)
+    } catch (error) {
+      // Most commonly git refusing because the worktree still holds
+      // uncommitted/untracked changes the user hasn't reviewed - left in
+      // place rather than losing work. Logged (not rethrown, so it never
+      // blocks a session's status transition) so a genuinely unexpected
+      // failure - e.g. the project directory having been moved - stays visible
+      // instead of silently leaking disk space forever.
+      console.error(`Failed to remove worktree for session ${session.id}:`, error)
+    }
+  }
+
   async function spawnSession(projectId: string): Promise<Session> {
     await writeQueue
     const existing = await loadProjects()
@@ -63,95 +96,112 @@ export function createEngine(adapters: EngineAdapters): Engine {
     const { worktreePath, branch } = await adapters.git.createWorktree(project.path)
     const { pid } = await adapters.process.spawnClaude(worktreePath)
 
-    const session: Session = {
-      id: randomUUID(),
-      projectId,
-      worktreePath,
-      branch,
-      pid,
-      status: 'running'
-    }
-    sessions = [...sessions, session]
+    return serializeSessionWrite(async () => {
+      const session: Session = {
+        id: randomUUID(),
+        projectId,
+        worktreePath,
+        branch,
+        pid,
+        status: 'running'
+      }
+      sessions = [...sessions, session]
 
-    return session
+      return session
+    })
   }
 
   function refreshSessionStatuses(): Promise<Session[]> {
-    sessions = sessions.map((session) => {
-      if (!ACTIVE_STATUSES.has(session.status)) return session
+    return serializeSessionWrite(async () => {
+      sessions = await Promise.all(
+        sessions.map(async (session) => {
+          if (!ACTIVE_STATUSES.has(session.status)) return session
 
-      if (!adapters.process.isAlive(session.pid)) {
-        const exitCode = adapters.process.exitCode(session.pid)
-        if (exitCode === 0) {
+          if (!adapters.process.isAlive(session.pid)) {
+            const exitCode = adapters.process.exitCode(session.pid)
+            const terminal: Session =
+              exitCode === 0
+                ? { ...session, status: 'done', pendingPrompt: undefined }
+                : { ...session, status: 'errored', pendingPrompt: undefined }
+
+            adapters.notification.notify(
+              exitCode === 0
+                ? {
+                    title: 'Session finished',
+                    body: `${session.branch} finished successfully.`,
+                    urgency: 'low'
+                  }
+                : {
+                    title: 'Session errored',
+                    body: `${session.branch} exited unexpectedly.`,
+                    urgency: 'critical'
+                  }
+            )
+            await cleanupWorktree(terminal)
+            return terminal
+          }
+
+          const prompt = adapters.process.pendingPrompt(session.pid)
+          if (!prompt) {
+            if (session.pendingPrompt) {
+              return { ...session, status: 'running', pendingPrompt: undefined }
+            }
+            return session
+          }
+
+          const status: SessionStatus =
+            prompt.type === 'permission' ? 'waiting-on-permission' : 'waiting-on-input'
+          const alreadyShown =
+            session.status === status && session.pendingPrompt?.text === prompt.text
+          if (alreadyShown) return session
+
           adapters.notification.notify({
-            title: 'Session finished',
-            body: `${session.branch} finished successfully.`,
-            urgency: 'low'
+            title:
+              prompt.type === 'permission' ? 'Session needs permission' : 'Session needs input',
+            body: `${session.branch} is waiting on you.`,
+            urgency: 'critical'
           })
-          return { ...session, status: 'done', pendingPrompt: undefined }
-        }
-
-        adapters.notification.notify({
-          title: 'Session errored',
-          body: `${session.branch} exited unexpectedly.`,
-          urgency: 'critical'
+          return { ...session, status, pendingPrompt: prompt }
         })
-        return { ...session, status: 'errored', pendingPrompt: undefined }
-      }
+      )
 
-      const prompt = adapters.process.pendingPrompt(session.pid)
-      if (!prompt) {
-        if (session.pendingPrompt) {
-          return { ...session, status: 'running', pendingPrompt: undefined }
-        }
-        return session
-      }
-
-      const status: SessionStatus =
-        prompt.type === 'permission' ? 'waiting-on-permission' : 'waiting-on-input'
-      const alreadyShown =
-        session.status === status && session.pendingPrompt?.text === prompt.text
-      if (alreadyShown) return session
-
-      adapters.notification.notify({
-        title: prompt.type === 'permission' ? 'Session needs permission' : 'Session needs input',
-        body: `${session.branch} is waiting on you.`,
-        urgency: 'critical'
-      })
-      return { ...session, status, pendingPrompt: prompt }
+      return sessions
     })
-
-    return Promise.resolve(sessions)
   }
 
-  async function respondToPrompt(sessionId: string, response: string): Promise<Session> {
-    const session = sessions.find((candidate) => candidate.id === sessionId)
-    if (!session) {
-      throw new Error(`Unknown session: ${sessionId}`)
-    }
-    if (!session.pendingPrompt) {
-      throw new Error(`Session has no pending prompt: ${sessionId}`)
-    }
+  function respondToPrompt(sessionId: string, response: string): Promise<Session> {
+    return serializeSessionWrite(async () => {
+      const session = sessions.find((candidate) => candidate.id === sessionId)
+      if (!session) {
+        throw new Error(`Unknown session: ${sessionId}`)
+      }
+      if (!session.pendingPrompt) {
+        throw new Error(`Session has no pending prompt: ${sessionId}`)
+      }
 
-    await adapters.process.respond(session.pid, response)
+      await adapters.process.respond(session.pid, response)
 
-    const updated: Session = { ...session, status: 'running', pendingPrompt: undefined }
-    sessions = sessions.map((candidate) => (candidate.id === sessionId ? updated : candidate))
-    return updated
+      const updated: Session = { ...session, status: 'running', pendingPrompt: undefined }
+      sessions = sessions.map((candidate) => (candidate.id === sessionId ? updated : candidate))
+      return updated
+    })
   }
 
-  async function stopSession(sessionId: string): Promise<Session> {
-    const session = sessions.find((candidate) => candidate.id === sessionId)
-    if (!session) {
-      throw new Error(`Unknown session: ${sessionId}`)
-    }
+  function stopSession(sessionId: string): Promise<Session> {
+    return serializeSessionWrite(async () => {
+      const session = sessions.find((candidate) => candidate.id === sessionId)
+      if (!session) {
+        throw new Error(`Unknown session: ${sessionId}`)
+      }
 
-    await adapters.process.stop(session.pid)
+      await adapters.process.stop(session.pid)
 
-    const stopped: Session = { ...session, status: 'stopped', pendingPrompt: undefined }
-    sessions = sessions.map((candidate) => (candidate.id === sessionId ? stopped : candidate))
+      const stopped: Session = { ...session, status: 'stopped', pendingPrompt: undefined }
+      sessions = sessions.map((candidate) => (candidate.id === sessionId ? stopped : candidate))
+      await cleanupWorktree(stopped)
 
-    return stopped
+      return stopped
+    })
   }
 
   return {
