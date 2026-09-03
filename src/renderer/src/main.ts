@@ -1,5 +1,7 @@
 import { resolvePermissionResponses } from '../../shared/prompt-options'
 import type { PendingPrompt, Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import { renderDiffLoadError, renderDiffLoading, renderDiffScreen } from './diff-view'
+import { el } from './dom'
 import {
   describeStatus,
   groupSessionsByProject,
@@ -15,25 +17,16 @@ const SESSION_STATUS_POLL_INTERVAL_MS = 2000
 
 const app = document.querySelector<HTMLDivElement>('#app')
 
-// The set of projects currently on screen, kept so the 2s status poll can
-// re-render without re-fetching (and without racing) the project list.
+// The set of projects/sessions currently on screen, kept so the 2s status
+// poll can re-render without re-fetching (and without racing) either list.
 let latestProjects: Project[] = []
+let latestSessions: Session[] = []
+
+type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string }
+let currentView: View = { type: 'dashboard' }
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> & { className?: string } = {},
-  children: (Node | string)[] = []
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag)
-  Object.assign(node, props)
-  for (const child of children) {
-    node.append(child)
-  }
-  return node
 }
 
 function renderStatusMarker(status: SessionStatus): HTMLElement {
@@ -64,6 +57,13 @@ function renderSessionRow(session: Session): HTMLElement {
     textContent: describeStatus(session.status)
   })
   const action = el('div', { className: 'row-action' })
+  const diffButton = el('button', {
+    type: 'button',
+    className: 'view-diff-button',
+    textContent: 'Diff'
+  })
+  diffButton.dataset.sessionId = session.id
+  action.append(diffButton)
   if (isStoppable(session.status)) {
     const stopButton = el('button', {
       type: 'button',
@@ -348,7 +348,7 @@ function restoreScrollPositions(positions: ScrollPositions): void {
   if (projectNav) projectNav.scrollTop = positions.projectNav
 }
 
-function render(projects: Project[], sessions: Session[]): void {
+function renderDashboard(projects: Project[], sessions: Session[]): void {
   if (!app) return
   const draft = captureReplyDraft()
   const scrollPositions = captureScrollPositions()
@@ -364,11 +364,53 @@ function render(projects: Project[], sessions: Session[]): void {
   restoreScrollPositions(scrollPositions)
 }
 
+// Diff data isn't part of the 2s status poll (shelling out to `git diff` on
+// every tick for every session would be wasteful) - it's fetched once when
+// the view is opened. `requestToken` guards against a slow fetch resolving
+// after the user has already navigated elsewhere and clobbering that view.
+let diffRequestToken = 0
+
+async function renderDiffView(sessionId: string): Promise<void> {
+  if (!app) return
+  const token = ++diffRequestToken
+
+  app.innerHTML = ''
+  app.append(renderDiffLoading())
+
+  const session = latestSessions.find((candidate) => candidate.id === sessionId)
+  if (!session) {
+    if (token !== diffRequestToken) return
+    app.innerHTML = ''
+    app.append(renderDiffLoadError(`Unknown session: ${sessionId}`))
+    return
+  }
+
+  try {
+    const files = await window.orca.getDiff(sessionId)
+    if (token !== diffRequestToken) return
+    app.innerHTML = ''
+    app.append(renderDiffScreen(session, files))
+  } catch (error) {
+    if (token !== diffRequestToken) return
+    app.innerHTML = ''
+    app.append(renderDiffLoadError(describeError(error)))
+  }
+}
+
+function renderApp(): void {
+  if (currentView.type === 'diff') {
+    void renderDiffView(currentView.sessionId)
+    return
+  }
+  renderDashboard(latestProjects, latestSessions)
+}
+
 async function refreshAll(): Promise<void> {
   try {
     const [projects, sessions] = await Promise.all([window.orca.listProjects(), window.orca.listSessions()])
     latestProjects = projects
-    render(projects, sessions)
+    latestSessions = sessions
+    renderApp()
     setStatus('')
   } catch (error) {
     setStatus(`Failed to load projects: ${describeError(error)}`)
@@ -378,7 +420,11 @@ async function refreshAll(): Promise<void> {
 async function pollSessionStatuses(): Promise<void> {
   try {
     const sessions = await window.orca.listSessions()
-    render(latestProjects, sessions)
+    latestSessions = sessions
+    // Only the dashboard reflects live status polling - re-rendering the
+    // diff view every 2s would reset its scroll position and re-fetch a
+    // `git diff` no one asked for.
+    if (currentView.type === 'dashboard') renderApp()
   } catch (error) {
     setStatus(`Failed to refresh session statuses: ${describeError(error)}`)
   }
@@ -428,6 +474,25 @@ function scrollToId(id: string): void {
 function handleAppClick(event: Event): void {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
+
+  const diffButton = target.closest<HTMLButtonElement>('.view-diff-button')
+  if (diffButton?.dataset.sessionId) {
+    currentView = { type: 'diff', sessionId: diffButton.dataset.sessionId }
+    renderApp()
+    return
+  }
+
+  if (target.closest('#diff-back-button')) {
+    currentView = { type: 'dashboard' }
+    renderApp()
+    return
+  }
+
+  const diffFileNavRow = target.closest<HTMLButtonElement>('.diff-file-nav-row')
+  if (diffFileNavRow?.dataset.diffAnchorId) {
+    scrollToId(diffFileNavRow.dataset.diffAnchorId)
+    return
+  }
 
   if (target.closest('.js-add-project')) {
     void handleAddProject()

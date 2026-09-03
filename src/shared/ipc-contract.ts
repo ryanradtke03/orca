@@ -35,6 +35,16 @@ export interface Session {
   pendingPrompt?: PendingPrompt
 }
 
+export type FileDiffStatus = 'added' | 'modified' | 'deleted' | 'renamed'
+
+export interface FileDiff {
+  path: string
+  status: FileDiffStatus
+  additions: number
+  deletions: number
+  diffText: string
+}
+
 export const IPC_CHANNELS = {
   ping: 'engine:ping',
   listProjects: 'project:list',
@@ -43,7 +53,8 @@ export const IPC_CHANNELS = {
   listSessions: 'session:list',
   refreshSessionStatuses: 'session:refresh-statuses',
   stopSession: 'session:stop',
-  respondToPrompt: 'session:respond-to-prompt'
+  respondToPrompt: 'session:respond-to-prompt',
+  getDiff: 'session:get-diff'
 } as const
 
 export interface OrcaApi {
@@ -55,4 +66,5 @@ export interface OrcaApi {
   refreshSessionStatuses(): Promise<Session[]>
   stopSession(sessionId: string): Promise<Session>
   respondToPrompt(sessionId: string, response: string): Promise<Session>
+  getDiff(sessionId: string): Promise<FileDiff[]>
 }

@@ -34,4 +34,6 @@ export function registerIpcHandlers(engine: Engine): void {
   ipcMain.handle(IPC_CHANNELS.respondToPrompt, (_event, sessionId: string, response: string) =>
     engine.respondToPrompt(sessionId, response)
   )
+
+  ipcMain.handle(IPC_CHANNELS.getDiff, (_event, sessionId: string) => engine.getDiff(sessionId))
 }

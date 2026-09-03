@@ -1,6 +1,6 @@
-import type { PendingPrompt, Project } from '../../shared/ipc-contract'
+import type { FileDiff, PendingPrompt, Project } from '../../shared/ipc-contract'
 
-export type { PendingPrompt, PendingPromptType } from '../../shared/ipc-contract'
+export type { FileDiff, FileDiffStatus, PendingPrompt, PendingPromptType } from '../../shared/ipc-contract'
 
 export interface PersistenceAdapter {
   loadSessionCount(): Promise<number>
@@ -11,11 +11,15 @@ export interface PersistenceAdapter {
 export interface WorktreeInfo {
   worktreePath: string
   branch: string
+  // The commit the worktree's branch forked from - lets getDiff show
+  // everything a Session has changed regardless of whether it committed.
+  baseRef: string
 }
 
 export interface GitAdapter {
   createWorktree(projectPath: string): Promise<WorktreeInfo>
   removeWorktree(projectPath: string, worktreePath: string): Promise<void>
+  getDiff(worktreePath: string, baseRef: string): Promise<FileDiff[]>
 }
 
 export interface ProcessInfo {

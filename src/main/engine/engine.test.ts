@@ -140,7 +140,8 @@ describe('Engine.createWorktree', () => {
 
     expect(result).toEqual({
       worktreePath: '/tmp/my-project/worktree-1',
-      branch: 'orca-session-fake-1'
+      branch: 'orca-session-fake-1',
+      baseRef: 'base-1'
     })
   })
 
@@ -285,7 +286,7 @@ describe('Engine.stopSession', () => {
     expect(sessions).toEqual([expect.objectContaining({ id: session.id, status: 'stopped' })])
   })
 
-  it('removes the worktree once the session is stopped', async () => {
+  it('leaves the worktree in place after stopping, so its diff stays reviewable', async () => {
     const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project' }]
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
@@ -296,24 +297,7 @@ describe('Engine.stopSession', () => {
 
     await engine.stopSession(session.id)
 
-    expect(git.removedWorktrees).toEqual([
-      { projectPath: '/tmp/my-project', worktreePath: session.worktreePath }
-    ])
-  })
-
-  it('leaves the worktree in place when removal fails, without throwing', async () => {
-    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project' }]
-    const persistence = createFakePersistenceAdapter({ projects: seeded })
-    const git = createFakeGitAdapter()
-    const processAdapter = createFakeProcessAdapter()
-    const notification = createFakeNotificationAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification })
-    const session = await engine.spawnSession('project-1')
-    git.simulateDirtyWorktree(session.worktreePath)
-
-    await expect(engine.stopSession(session.id)).resolves.toMatchObject({ status: 'stopped' })
-
-    expect(git.removedWorktrees).toEqual([])
+    expect(git.removeWorktreeCalls).toEqual([])
   })
 
   it('clears a pending prompt when stopping a session that was waiting on one', async () => {
@@ -454,7 +438,7 @@ describe('Engine.refreshSessionStatuses', () => {
     expect(session.status).toBe('done')
   })
 
-  it('removes the worktree once a session transitions to done', async () => {
+  it('leaves the worktree in place once a session transitions to done, so its diff stays reviewable', async () => {
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
     const processAdapter = createFakeProcessAdapter()
@@ -465,12 +449,10 @@ describe('Engine.refreshSessionStatuses', () => {
     processAdapter.simulateExit(spawned.pid, 0)
     await engine.refreshSessionStatuses()
 
-    expect(git.removedWorktrees).toEqual([
-      { projectPath: '/tmp/my-project', worktreePath: spawned.worktreePath }
-    ])
+    expect(git.removeWorktreeCalls).toEqual([])
   })
 
-  it('removes the worktree once a session transitions to errored', async () => {
+  it('leaves the worktree in place once a session transitions to errored, so its diff stays reviewable', async () => {
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
     const processAdapter = createFakeProcessAdapter()
@@ -481,63 +463,7 @@ describe('Engine.refreshSessionStatuses', () => {
     processAdapter.simulateExit(spawned.pid, 1)
     await engine.refreshSessionStatuses()
 
-    expect(git.removedWorktrees).toEqual([
-      { projectPath: '/tmp/my-project', worktreePath: spawned.worktreePath }
-    ])
-  })
-
-  it('leaves the worktree in place when removal fails, without throwing', async () => {
-    const persistence = createFakePersistenceAdapter({ projects: seeded })
-    const git = createFakeGitAdapter()
-    const processAdapter = createFakeProcessAdapter()
-    const notification = createFakeNotificationAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification })
-
-    const spawned = await engine.spawnSession('project-1')
-    git.simulateDirtyWorktree(spawned.worktreePath)
-    processAdapter.simulateExit(spawned.pid, 0)
-
-    const [session] = await engine.refreshSessionStatuses()
-
-    expect(session.status).toBe('done')
-    expect(git.removedWorktrees).toEqual([])
-  })
-
-  it('does not lose a concurrent stopSession update while a slow cleanup is in flight', async () => {
-    const persistence = createFakePersistenceAdapter({ projects: seeded })
-    const git = createFakeGitAdapter()
-    const processAdapter = createFakeProcessAdapter()
-    const notification = createFakeNotificationAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification })
-
-    const a = await engine.spawnSession('project-1')
-    const b = await engine.spawnSession('project-1')
-    const releaseCleanup = git.blockRemoval(a.worktreePath)
-
-    processAdapter.simulateExit(a.pid, 0)
-    const refreshPromise = engine.refreshSessionStatuses()
-    const stopPromise = engine.stopSession(b.id)
-    releaseCleanup()
-
-    await Promise.all([refreshPromise, stopPromise])
-
-    const sessions = await engine.listSessions()
-    expect(sessions.find((s) => s.id === b.id)?.status).toBe('stopped')
-  })
-
-  it('does not attempt to remove the worktree again on a later refresh', async () => {
-    const persistence = createFakePersistenceAdapter({ projects: seeded })
-    const git = createFakeGitAdapter()
-    const processAdapter = createFakeProcessAdapter()
-    const notification = createFakeNotificationAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification })
-
-    const spawned = await engine.spawnSession('project-1')
-    processAdapter.simulateExit(spawned.pid, 0)
-    await engine.refreshSessionStatuses()
-    await engine.refreshSessionStatuses()
-
-    expect(git.removedWorktrees).toHaveLength(1)
+    expect(git.removeWorktreeCalls).toEqual([])
   })
 
   it('resolves multiple sessions independently based on their own process outcome', async () => {
@@ -702,5 +628,62 @@ describe('Engine.respondToPrompt', () => {
     await expect(engine.respondToPrompt(spawned.id, 'yes')).rejects.toThrow(
       `Session has no pending prompt: ${spawned.id}`
     )
+  })
+})
+
+describe('Engine.getDiff', () => {
+  const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project' }]
+
+  it("delegates to the Git adapter with the session's worktree path and base ref", async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+    const spawned = await engine.spawnSession('project-1')
+
+    await engine.getDiff(spawned.id)
+
+    expect(git.getDiffCalls).toEqual([{ worktreePath: spawned.worktreePath, baseRef: 'base-1' }])
+  })
+
+  it('returns the file diffs reported by the Git adapter', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+    const spawned = await engine.spawnSession('project-1')
+    const files = [
+      { path: 'foo.ts', status: 'modified' as const, additions: 3, deletions: 1, diffText: '...' }
+    ]
+    git.simulateDiff(spawned.worktreePath, files)
+
+    await expect(engine.getDiff(spawned.id)).resolves.toEqual(files)
+  })
+
+  it('rejects when the session id is unknown', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+
+    await expect(engine.getDiff('missing')).rejects.toThrow('Unknown session: missing')
+  })
+
+  it('keeps diffing against the same base ref even after the session finishes', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification })
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+
+    await engine.getDiff(spawned.id)
+
+    expect(git.getDiffCalls).toEqual([{ worktreePath: spawned.worktreePath, baseRef: 'base-1' }])
   })
 })

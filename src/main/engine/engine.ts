@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { basename } from 'path'
-import type { PingResult, Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import type { FileDiff, PingResult, Project, Session, SessionStatus } from '../../shared/ipc-contract'
 import type { EngineAdapters, WorktreeInfo } from './adapters'
 
 export interface Engine {
@@ -13,6 +13,7 @@ export interface Engine {
   refreshSessionStatuses(): Promise<Session[]>
   stopSession(sessionId: string): Promise<Session>
   respondToPrompt(sessionId: string, response: string): Promise<Session>
+  getDiff(sessionId: string): Promise<FileDiff[]>
 }
 
 // Sessions whose process is still expected to be running; refreshSessionStatuses
@@ -26,14 +27,14 @@ const ACTIVE_STATUSES: ReadonlySet<Session['status']> = new Set([
 export function createEngine(adapters: EngineAdapters): Engine {
   let projects: Project[] | undefined
   let sessions: Session[] = []
+  // The commit each session's worktree branch forked from, so getDiff knows
+  // what to diff against. Keyed separately from Session (rather than added to
+  // it) since it's Git-adapter bookkeeping, not something the renderer needs.
+  const worktreeBaseRefs = new Map<string, string>()
   // Serializes addProject calls, and reads that must not observe a write mid-flight,
   // so a concurrent read-modify-write can't drop a write or return a stale project list.
   let writeQueue: Promise<unknown> = Promise.resolve()
   // Serializes every read-modify-write of `sessions` (spawn/stop/respond/refresh).
-  // refreshSessionStatuses now awaits cleanupWorktree per session before it
-  // reassigns the whole array - without this queue, a stopSession/respondToPrompt
-  // that completes during that await would have its update silently overwritten
-  // by refresh's stale, pre-await snapshot of the other sessions.
   let sessionsQueue: Promise<unknown> = Promise.resolve()
 
   function serializeSessionWrite<T>(fn: () => Promise<T>): Promise<T> {
@@ -67,24 +68,6 @@ export function createEngine(adapters: EngineAdapters): Engine {
     return result
   }
 
-  async function cleanupWorktree(session: Session): Promise<void> {
-    const existing = await loadProjects()
-    const project = existing.find((candidate) => candidate.id === session.projectId)
-    if (!project) return
-
-    try {
-      await adapters.git.removeWorktree(project.path, session.worktreePath)
-    } catch (error) {
-      // Most commonly git refusing because the worktree still holds
-      // uncommitted/untracked changes the user hasn't reviewed - left in
-      // place rather than losing work. Logged (not rethrown, so it never
-      // blocks a session's status transition) so a genuinely unexpected
-      // failure - e.g. the project directory having been moved - stays visible
-      // instead of silently leaking disk space forever.
-      console.error(`Failed to remove worktree for session ${session.id}:`, error)
-    }
-  }
-
   async function spawnSession(projectId: string): Promise<Session> {
     await writeQueue
     const existing = await loadProjects()
@@ -93,7 +76,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
       throw new Error(`Unknown project: ${projectId}`)
     }
 
-    const { worktreePath, branch } = await adapters.git.createWorktree(project.path)
+    const { worktreePath, branch, baseRef } = await adapters.git.createWorktree(project.path)
     const { pid } = await adapters.process.spawnClaude(worktreePath)
 
     return serializeSessionWrite(async () => {
@@ -106,9 +89,23 @@ export function createEngine(adapters: EngineAdapters): Engine {
         status: 'running'
       }
       sessions = [...sessions, session]
+      worktreeBaseRefs.set(session.id, baseRef)
 
       return session
     })
+  }
+
+  async function getDiff(sessionId: string): Promise<FileDiff[]> {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+    const baseRef = worktreeBaseRefs.get(sessionId)
+    if (!baseRef) {
+      throw new Error(`No base ref recorded for session: ${sessionId}`)
+    }
+
+    return adapters.git.getDiff(session.worktreePath, baseRef)
   }
 
   function refreshSessionStatuses(): Promise<Session[]> {
@@ -137,7 +134,6 @@ export function createEngine(adapters: EngineAdapters): Engine {
                     urgency: 'critical'
                   }
             )
-            await cleanupWorktree(terminal)
             return terminal
           }
 
@@ -198,7 +194,6 @@ export function createEngine(adapters: EngineAdapters): Engine {
 
       const stopped: Session = { ...session, status: 'stopped', pendingPrompt: undefined }
       sessions = sessions.map((candidate) => (candidate.id === sessionId ? stopped : candidate))
-      await cleanupWorktree(stopped)
 
       return stopped
     })
@@ -222,6 +217,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     },
     refreshSessionStatuses,
     stopSession,
-    respondToPrompt
+    respondToPrompt,
+    getDiff
   }
 }

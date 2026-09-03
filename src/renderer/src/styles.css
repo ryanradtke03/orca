@@ -20,6 +20,11 @@
   --accent-ink: #0b0b0b;
   --danger: #ff8a80;
 
+  --diff-add-text: #8fe3ab;
+  --diff-add-bg: rgba(90, 200, 130, 0.12);
+  --diff-del-text: #ff8a80;
+  --diff-del-bg: rgba(255, 110, 110, 0.1);
+
   --font-ui: 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -524,16 +529,22 @@ button {
 
 .session-row .row-action {
   flex: none;
-  width: 52px;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
+.view-diff-button,
 .stop-session-button {
   background: none;
   border: none;
   padding: 0;
   font: 400 11px/1 var(--font-ui);
   color: var(--text-faint);
+}
+
+.view-diff-button:hover {
+  color: var(--text-primary);
 }
 
 .stop-session-button:hover {
@@ -623,4 +634,187 @@ button {
   margin-top: 8px;
   font: 400 11.5px/1.45 var(--font-ui);
   color: var(--text-secondary);
+}
+
+/* Diff screen */
+
+#diff-screen {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+}
+
+#diff-sidebar {
+  width: 260px;
+  flex: none;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-soft);
+  overflow-y: auto;
+  padding: 20px 12px;
+}
+
+#diff-sidebar .section-label {
+  padding: 0 6px 8px;
+  font: 500 9.5px/1 var(--font-ui);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.diff-file-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.diff-file-nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 6px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  text-align: left;
+  width: 100%;
+}
+
+.diff-file-nav-row:hover {
+  background: var(--bg-hover);
+}
+
+.diff-file-nav-row .path {
+  min-width: 0;
+  flex: 1;
+  font: 400 11px/1.3 var(--font-mono);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.diff-file-nav-row .stats {
+  flex: none;
+  font: 400 9.5px/1 var(--font-mono);
+  white-space: nowrap;
+}
+
+#diff-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+#diff-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+#diff-session-name {
+  font: 500 14px/1.1 var(--font-mono);
+  color: var(--text-primary);
+}
+
+#diff-session-stats {
+  margin-top: 6px;
+  font: 400 10.5px/1 var(--font-mono);
+  color: var(--text-faint);
+}
+
+#diff-files {
+  padding-bottom: 24px;
+}
+
+#diff-empty {
+  padding: 40px 24px;
+  font: 400 12.5px/1.5 var(--font-ui);
+  color: var(--text-faint);
+}
+
+.diff-file {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.diff-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  background: var(--bg-panel-alt);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.diff-file-path {
+  flex: 1;
+  min-width: 0;
+  font: 400 11.5px/1 var(--font-mono);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.diff-file-stats {
+  flex: none;
+  font: 400 10.5px/1 var(--font-mono);
+}
+
+.diff-stat-add {
+  color: var(--diff-add-text);
+}
+
+.diff-stat-del {
+  color: var(--diff-del-text);
+}
+
+.diff-file-status {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border-medium);
+  font: 500 9px/1 var(--font-ui);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.diff-file-body {
+  font: 400 11.5px/1.6 var(--font-mono);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.diff-line {
+  padding: 0 22px;
+}
+
+.diff-line-hunk {
+  margin: 4px 0;
+  padding: 4px 22px;
+  background: #151514;
+  color: var(--text-tertiary);
+}
+
+.diff-line-add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-text);
+}
+
+.diff-line-del {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-text);
+}
+
+.diff-line-context {
+  color: var(--text-secondary);
+}
+
+.diff-line-meta {
+  color: var(--text-faint);
+  font-style: italic;
 }

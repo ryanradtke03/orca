@@ -46,6 +46,17 @@ describe('createRealGitAdapter', () => {
     expect(stdout.trim()).toBe(branch)
   })
 
+  it('reports the base ref as the project HEAD the worktree branched from', async () => {
+    const adapter = createRealGitAdapter(worktreesRootDir)
+    const { stdout: expectedHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      cwd: projectPath
+    })
+
+    const { baseRef } = await adapter.createWorktree(projectPath)
+
+    expect(baseRef).toBe(expectedHead.trim())
+  })
+
   it('creates multiple worktrees for the same project without colliding', async () => {
     const adapter = createRealGitAdapter(worktreesRootDir)
 
@@ -86,6 +97,61 @@ describe('createRealGitAdapter', () => {
       await expect(adapter.removeWorktree(projectPath, worktreePath)).rejects.toThrow()
 
       expect(existsSync(worktreePath)).toBe(true)
+    })
+  })
+
+  describe('getDiff', () => {
+    it('returns no files when the worktree has no changes', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, baseRef } = await adapter.createWorktree(projectPath)
+
+      await expect(adapter.getDiff(worktreePath, baseRef)).resolves.toEqual([])
+    })
+
+    it('reports an uncommitted change to an existing file', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, baseRef } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'README.md'), 'hello, updated')
+
+      const files = await adapter.getDiff(worktreePath, baseRef)
+
+      expect(files).toHaveLength(1)
+      expect(files[0]).toMatchObject({ path: 'README.md', status: 'modified' })
+      expect(files[0].diffText).toContain('hello, updated')
+    })
+
+    it('reports a new untracked file as added', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, baseRef } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'new-file.ts'), 'export const x = 1\n')
+
+      const files = await adapter.getDiff(worktreePath, baseRef)
+
+      expect(files).toEqual([expect.objectContaining({ path: 'new-file.ts', status: 'added' })])
+    })
+
+    it('reports a committed change on the worktree branch, not just uncommitted ones', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, baseRef } = await adapter.createWorktree(projectPath)
+      await writeFile(join(worktreePath, 'README.md'), 'hello, committed')
+      await execFileAsync('git', ['add', '.'], { cwd: worktreePath })
+      await execFileAsync('git', ['commit', '-m', 'update readme'], { cwd: worktreePath })
+
+      const files = await adapter.getDiff(worktreePath, baseRef)
+
+      expect(files).toEqual([expect.objectContaining({ path: 'README.md', status: 'modified' })])
+    })
+
+    it('is unaffected by commits made on the project after the worktree was created', async () => {
+      const adapter = createRealGitAdapter(worktreesRootDir)
+      const { worktreePath, baseRef } = await adapter.createWorktree(projectPath)
+      await writeFile(join(projectPath, 'unrelated.md'), 'unrelated project-side change')
+      await execFileAsync('git', ['add', '.'], { cwd: projectPath })
+      await execFileAsync('git', ['commit', '-m', 'unrelated'], { cwd: projectPath })
+
+      const files = await adapter.getDiff(worktreePath, baseRef)
+
+      expect(files).toEqual([])
     })
   })
 })

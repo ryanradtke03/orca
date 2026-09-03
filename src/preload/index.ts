@@ -10,7 +10,8 @@ const orca: OrcaApi = {
   refreshSessionStatuses: () => ipcRenderer.invoke(IPC_CHANNELS.refreshSessionStatuses),
   stopSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.stopSession, sessionId),
   respondToPrompt: (sessionId, response) =>
-    ipcRenderer.invoke(IPC_CHANNELS.respondToPrompt, sessionId, response)
+    ipcRenderer.invoke(IPC_CHANNELS.respondToPrompt, sessionId, response),
+  getDiff: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getDiff, sessionId)
 }
 
 contextBridge.exposeInMainWorld('orca', orca)
