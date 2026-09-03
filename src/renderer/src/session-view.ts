@@ -1,0 +1,71 @@
+import type { Project, Session, SessionStatus } from '../../shared/ipc-contract'
+
+const STATUS_LABELS: Record<SessionStatus, string> = {
+  running: 'Running',
+  'waiting-on-permission': 'Waiting · permission',
+  'waiting-on-input': 'Waiting · input',
+  idle: 'Idle',
+  done: 'Done',
+  errored: 'Errored',
+  stopped: 'Stopped'
+}
+
+export function describeStatus(status: SessionStatus): string {
+  return STATUS_LABELS[status]
+}
+
+export const STOPPABLE_STATUSES: ReadonlySet<SessionStatus> = new Set([
+  'running',
+  'waiting-on-permission',
+  'waiting-on-input'
+])
+
+export function isStoppable(status: SessionStatus): boolean {
+  return STOPPABLE_STATUSES.has(status)
+}
+
+export function isAttentionStatus(status: SessionStatus): boolean {
+  return status === 'waiting-on-permission' || status === 'waiting-on-input'
+}
+
+export function isTerminalStatus(status: SessionStatus): boolean {
+  return status === 'done' || status === 'errored' || status === 'stopped'
+}
+
+type SummaryBucket = 'running' | 'waiting' | 'idle' | 'done' | 'errored' | 'stopped'
+
+const SUMMARY_BUCKET_ORDER: SummaryBucket[] = ['running', 'waiting', 'idle', 'done', 'errored', 'stopped']
+
+function bucketFor(status: SessionStatus): SummaryBucket {
+  if (status === 'waiting-on-permission' || status === 'waiting-on-input') return 'waiting'
+  return status
+}
+
+/** Header stats line, e.g. "3 running · 2 waiting · 2 done" — zero-count buckets are omitted. */
+export function summarizeStatuses(sessions: Session[]): string {
+  const counts = new Map<SummaryBucket, number>()
+  for (const session of sessions) {
+    const bucket = bucketFor(session.status)
+    counts.set(bucket, (counts.get(bucket) ?? 0) + 1)
+  }
+
+  return SUMMARY_BUCKET_ORDER.filter((bucket) => counts.has(bucket))
+    .map((bucket) => `${counts.get(bucket)} ${bucket}`)
+    .join(' · ')
+}
+
+export interface ProjectSessionGroup {
+  project: Project
+  sessions: Session[]
+}
+
+export function groupSessionsByProject(projects: Project[], sessions: Session[]): ProjectSessionGroup[] {
+  return projects.map((project) => ({
+    project,
+    sessions: sessions.filter((session) => session.projectId === project.id)
+  }))
+}
+
+export function needsAttentionSessions(sessions: Session[]): Session[] {
+  return sessions.filter((session) => session.pendingPrompt !== undefined)
+}
