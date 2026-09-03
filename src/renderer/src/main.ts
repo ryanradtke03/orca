@@ -1,3 +1,4 @@
+import { resolvePermissionResponses } from '../../shared/prompt-options'
 import type { PendingPrompt, Project, Session } from '../../shared/ipc-contract'
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 2000
@@ -52,7 +53,7 @@ function renderSessionList(sessions: Session[]): HTMLUListElement {
     li.appendChild(statusBadge)
 
     if (session.pendingPrompt) {
-      li.appendChild(renderPendingPrompt(session.pendingPrompt))
+      li.appendChild(renderPendingPrompt(session.pendingPrompt, session.id))
     }
 
     if (STOPPABLE_STATUSES.has(session.status)) {
@@ -70,7 +71,7 @@ function renderSessionList(sessions: Session[]): HTMLUListElement {
   return ul
 }
 
-function renderPendingPrompt(prompt: PendingPrompt): HTMLElement {
+function renderPendingPrompt(prompt: PendingPrompt, sessionId: string): HTMLElement {
   const wrapper = document.createElement('div')
   wrapper.className = 'pending-prompt'
   wrapper.dataset.promptType = prompt.type
@@ -85,7 +86,36 @@ function renderPendingPrompt(prompt: PendingPrompt): HTMLElement {
   text.textContent = prompt.text
   wrapper.appendChild(text)
 
+  if (prompt.type === 'permission') {
+    wrapper.appendChild(renderPromptActions(prompt, sessionId))
+  }
+
   return wrapper
+}
+
+function renderPromptActions(prompt: PendingPrompt, sessionId: string): HTMLElement {
+  const { approve, deny } = resolvePermissionResponses(prompt.text)
+
+  const actions = document.createElement('div')
+  actions.className = 'pending-prompt-actions'
+
+  const approveButton = document.createElement('button')
+  approveButton.type = 'button'
+  approveButton.className = 'approve-prompt-button'
+  approveButton.textContent = 'Approve'
+  approveButton.dataset.sessionId = sessionId
+  approveButton.dataset.response = approve
+  actions.appendChild(approveButton)
+
+  const denyButton = document.createElement('button')
+  denyButton.type = 'button'
+  denyButton.className = 'deny-prompt-button'
+  denyButton.textContent = 'Deny'
+  denyButton.dataset.sessionId = sessionId
+  denyButton.dataset.response = deny
+  actions.appendChild(denyButton)
+
+  return actions
 }
 
 function renderProjectList(projects: Project[], sessions: Session[]): void {
@@ -172,7 +202,7 @@ function updateSessionRows(sessions: Session[]): void {
     const existingPrompt = li.querySelector<HTMLElement>('.pending-prompt')
     existingPrompt?.remove()
     if (session.pendingPrompt) {
-      badge?.after(renderPendingPrompt(session.pendingPrompt))
+      badge?.after(renderPendingPrompt(session.pendingPrompt, session.id))
     }
 
     const existingStopButton = li.querySelector<HTMLButtonElement>('.stop-session-button')
@@ -209,6 +239,15 @@ async function handleStopSession(sessionId: string): Promise<void> {
   }
 }
 
+async function handleRespondToPrompt(sessionId: string, response: string): Promise<void> {
+  try {
+    await window.orca.respondToPrompt(sessionId, response)
+    await refreshAll()
+  } catch (error) {
+    setStatus(`Failed to respond to prompt: ${describeError(error)}`)
+  }
+}
+
 function handleProjectListClick(event: Event): void {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
@@ -222,6 +261,14 @@ function handleProjectListClick(event: Event): void {
   const stopSessionButton = target.closest<HTMLButtonElement>('.stop-session-button')
   if (stopSessionButton?.dataset.sessionId) {
     void handleStopSession(stopSessionButton.dataset.sessionId)
+    return
+  }
+
+  const promptActionButton = target.closest<HTMLButtonElement>(
+    '.approve-prompt-button, .deny-prompt-button'
+  )
+  if (promptActionButton?.dataset.sessionId && promptActionButton.dataset.response) {
+    void handleRespondToPrompt(promptActionButton.dataset.sessionId, promptActionButton.dataset.response)
   }
 }
 
