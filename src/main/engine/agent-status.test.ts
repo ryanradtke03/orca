@@ -13,19 +13,19 @@ describe('createAgentStatusLister', () => {
     ])
   })
 
-  it('returns an empty list when the command fails', async () => {
+  it('rejects when the command fails', async () => {
     const listAgentStatuses = createAgentStatusLister('orca-nonexistent-command-xyz')
 
-    await expect(listAgentStatuses()).resolves.toEqual([])
+    await expect(listAgentStatuses()).rejects.toThrow()
   })
 
-  it('returns an empty list when the output is not valid JSON', async () => {
+  it('rejects when the output is not valid JSON', async () => {
     const listAgentStatuses = createAgentStatusLister(process.execPath, [
       '-e',
       "process.stdout.write('not json')"
     ])
 
-    await expect(listAgentStatuses()).resolves.toEqual([])
+    await expect(listAgentStatuses()).rejects.toThrow()
   })
 })
 

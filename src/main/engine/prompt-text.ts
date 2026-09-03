@@ -1,9 +1,11 @@
 import { Terminal } from '@xterm/headless'
 
 // Wide/tall enough that a permission dialog's command block and option list
-// never wrap or get pushed off the tracked scrollback.
-const TERMINAL_COLS = 220
-const TERMINAL_ROWS = 60
+// never wrap or get pushed off the tracked scrollback. The pty real-process-
+// adapter.ts attaches with must use these same dimensions - extractPromptText
+// is validated against screens rendered at this exact size.
+export const TERMINAL_COLS = 220
+export const TERMINAL_ROWS = 60
 
 /**
  * Renders a chunk of raw terminal output (as produced by a real TTY session -

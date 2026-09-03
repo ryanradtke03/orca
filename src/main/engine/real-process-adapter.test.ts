@@ -3,6 +3,7 @@ import { mkdtemp, realpath, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createAgentStatusLister } from './agent-status'
 import { createRealProcessAdapter } from './real-process-adapter'
 
 const FAKE_CLI = join(__dirname, 'real-process-adapter.fake-cli.cjs')
@@ -191,5 +192,39 @@ describe('createRealProcessAdapter', () => {
     const adapter = createRealProcessAdapter('orca-nonexistent-command-xyz')
 
     await expect(adapter.spawnClaude(dir)).rejects.toThrow()
+  })
+
+  it('survives a transient failure listing agent statuses without marking sessions crashed', async () => {
+    const realList = createAgentStatusLister(FAKE_CLI)
+    let failNext = false
+    const flakyList = async (): ReturnType<typeof realList> => {
+      if (failNext) {
+        failNext = false
+        throw new Error('simulated transient failure')
+      }
+      return realList()
+    }
+
+    const adapter = createRealProcessAdapter(FAKE_CLI, [], flakyList)
+    const { pid } = await adapter.spawnClaude(dir)
+    expect(adapter.isAlive(pid)).toBe(true)
+
+    failNext = true
+    // Give the poll timer a few ticks to run into (and recover from) the
+    // simulated failure.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    expect(adapter.isAlive(pid)).toBe(true)
+    expect(adapter.exitCode(pid)).toBeNull()
+  })
+
+  it('does not attempt to respond to a session that is no longer alive', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+    const { pid } = await adapter.spawnClaude(dir)
+
+    process.kill(pid, 'SIGKILL')
+    await waitUntil(() => !adapter.isAlive(pid))
+
+    await expect(adapter.respond(pid, '1')).resolves.toBeUndefined()
   })
 })

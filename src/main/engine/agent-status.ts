@@ -19,16 +19,14 @@ export type ListAgentStatuses = () => Promise<AgentStatusEntry[]>
 // `args` defaults to the real subcommand, but is overridable so tests can
 // point `command` at a stand-in binary (e.g. `node -e <script>`) without
 // that stand-in needing to accept and ignore `agents --json --all`.
+// Throws on any failure (CLI busy, momentarily unreachable, bad output)
+// rather than swallowing to an empty list - an empty list is meaningfully
+// different from "couldn't ask": callers that treated them the same used to
+// read a transient failure as "every tracked session just vanished".
 export function createAgentStatusLister(command = 'claude', args = ['agents', '--json', '--all']): ListAgentStatuses {
   return async function listAgentStatuses(): Promise<AgentStatusEntry[]> {
-    try {
-      const { stdout } = await execFileAsync(command, args)
-      return JSON.parse(stdout) as AgentStatusEntry[]
-    } catch {
-      // Transient failure (CLI busy, momentarily unreachable, bad output) -
-      // callers treat this the same as "nothing to report" for that tick.
-      return []
-    }
+    const { stdout } = await execFileAsync(command, args)
+    return JSON.parse(stdout) as AgentStatusEntry[]
   }
 }
 
