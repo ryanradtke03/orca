@@ -75,6 +75,7 @@ function renderPendingPrompt(prompt: PendingPrompt, sessionId: string): HTMLElem
   const wrapper = document.createElement('div')
   wrapper.className = 'pending-prompt'
   wrapper.dataset.promptType = prompt.type
+  wrapper.dataset.promptText = prompt.text
 
   const label = document.createElement('span')
   label.className = 'pending-prompt-label'
@@ -88,9 +89,33 @@ function renderPendingPrompt(prompt: PendingPrompt, sessionId: string): HTMLElem
 
   if (prompt.type === 'permission') {
     wrapper.appendChild(renderPromptActions(prompt, sessionId))
+  } else {
+    wrapper.appendChild(renderReplyForm(sessionId))
   }
 
   return wrapper
+}
+
+function renderReplyForm(sessionId: string): HTMLFormElement {
+  const form = document.createElement('form')
+  form.className = 'pending-prompt-reply'
+  form.dataset.sessionId = sessionId
+
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.className = 'pending-prompt-reply-input'
+  input.placeholder = 'Type a reply…'
+  input.autocomplete = 'off'
+  input.required = true
+  form.appendChild(input)
+
+  const sendButton = document.createElement('button')
+  sendButton.type = 'submit'
+  sendButton.className = 'reply-prompt-button'
+  sendButton.textContent = 'Send'
+  form.appendChild(sendButton)
+
+  return form
 }
 
 function renderPromptActions(prompt: PendingPrompt, sessionId: string): HTMLElement {
@@ -200,9 +225,16 @@ function updateSessionRows(sessions: Session[]): void {
     }
 
     const existingPrompt = li.querySelector<HTMLElement>('.pending-prompt')
-    existingPrompt?.remove()
-    if (session.pendingPrompt) {
-      badge?.after(renderPendingPrompt(session.pendingPrompt, session.id))
+    const promptUnchanged =
+      existingPrompt !== null &&
+      session.pendingPrompt !== undefined &&
+      existingPrompt.dataset.promptType === session.pendingPrompt.type &&
+      existingPrompt.dataset.promptText === session.pendingPrompt.text
+    if (!promptUnchanged) {
+      existingPrompt?.remove()
+      if (session.pendingPrompt) {
+        badge?.after(renderPendingPrompt(session.pendingPrompt, session.id))
+      }
     }
 
     const existingStopButton = li.querySelector<HTMLButtonElement>('.stop-session-button')
@@ -233,7 +265,9 @@ async function pollSessionStatuses(): Promise<void> {
 async function handleStopSession(sessionId: string): Promise<void> {
   try {
     await window.orca.stopSession(sessionId)
-    await refreshAll()
+    // Updates rows in place rather than refreshAll()'s full teardown, which would
+    // wipe any text a user is mid-typing into another session's reply field.
+    await pollSessionStatuses()
   } catch (error) {
     setStatus(`Failed to stop session: ${describeError(error)}`)
   }
@@ -242,7 +276,9 @@ async function handleStopSession(sessionId: string): Promise<void> {
 async function handleRespondToPrompt(sessionId: string, response: string): Promise<void> {
   try {
     await window.orca.respondToPrompt(sessionId, response)
-    await refreshAll()
+    // Updates rows in place rather than refreshAll()'s full teardown, which would
+    // wipe any text a user is mid-typing into another session's reply field.
+    await pollSessionStatuses()
   } catch (error) {
     setStatus(`Failed to respond to prompt: ${describeError(error)}`)
   }
@@ -272,6 +308,27 @@ function handleProjectListClick(event: Event): void {
   }
 }
 
+function handleProjectListSubmit(event: Event): void {
+  const form = event.target
+  if (!(form instanceof HTMLFormElement) || !form.classList.contains('pending-prompt-reply')) {
+    return
+  }
+  event.preventDefault()
+
+  const sessionId = form.dataset.sessionId
+  const input = form.querySelector<HTMLInputElement>('.pending-prompt-reply-input')
+  const reply = input?.value.trim()
+  if (!sessionId) return
+  // `required` blocks a fully empty submit; this catches the whitespace-only case
+  // it can't, so the user still sees why nothing was sent instead of silence.
+  if (!reply) {
+    setStatus('Reply cannot be blank.')
+    return
+  }
+
+  void handleRespondToPrompt(sessionId, reply)
+}
+
 async function render(): Promise<void> {
   renderShell()
 
@@ -280,6 +337,7 @@ async function render(): Promise<void> {
 
   const projectList = document.querySelector<HTMLDivElement>('#project-list')
   projectList?.addEventListener('click', handleProjectListClick)
+  projectList?.addEventListener('submit', handleProjectListSubmit)
 
   await refreshAll()
 
