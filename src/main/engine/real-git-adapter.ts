@@ -72,6 +72,20 @@ async function diffUntrackedFile(worktreePath: string, relativePath: string): Pr
   }
 }
 
+// A Session's own process can still be editing the worktree while the user
+// is looking at its diff, so a file `ls-files` just reported as untracked
+// can vanish (or become unreadable) by the time it's actually diffed. That
+// one file's diff is worth losing; the tracked diff and every other
+// untracked file's diff the batch already produced are not.
+async function diffUntrackedFileTolerantly(worktreePath: string, relativePath: string): Promise<string> {
+  try {
+    return await diffUntrackedFile(worktreePath, relativePath)
+  } catch (error) {
+    console.error(`Failed to diff untracked file "${relativePath}" in ${worktreePath}:`, error)
+    return ''
+  }
+}
+
 export function createRealGitAdapter(worktreesRootDir: string): GitAdapter {
   return {
     async createWorktree(projectPath: string) {
@@ -112,7 +126,7 @@ export function createRealGitAdapter(worktreesRootDir: string): GitAdapter {
       const untrackedDiffs = await mapWithConcurrencyLimit(
         untrackedFiles,
         UNTRACKED_DIFF_CONCURRENCY,
-        (path) => diffUntrackedFile(worktreePath, path)
+        (path) => diffUntrackedFileTolerantly(worktreePath, path)
       )
 
       const blocks = [trackedDiff, ...untrackedDiffs].map((block) => block.trim()).filter(Boolean)

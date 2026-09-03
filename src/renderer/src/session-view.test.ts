@@ -16,6 +16,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     projectId: 'project-1',
     worktreePath: '/tmp/session-1',
     branch: 'orca/session-1',
+    baseRef: 'abc123',
     pid: 1,
     status: 'running',
     ...overrides

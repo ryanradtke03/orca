@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { createProductionEngine } from './composition-root'
+import { createDemoEngine } from './demo-engine'
 import { registerIpcHandlers } from './ipc'
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 2000
@@ -32,7 +33,13 @@ app.whenReady().then(() => {
     app.dock?.setIcon(join(__dirname, '../../resources/icon.png'))
   }
 
-  const engine = createProductionEngine()
+  // ORCA_DEMO runs the app against seeded fake adapters (no real `claude`
+  // process or git repo) so the UI - including sessions with a diff or a
+  // pending prompt already attached - can be clicked through directly.
+  // Gated on !app.isPackaged too so a stray ORCA_DEMO in a distributed
+  // build's environment can't silently swap out real data for fake.
+  const useDemoEngine = !app.isPackaged && process.env.ORCA_DEMO === '1'
+  const engine = useDemoEngine ? createDemoEngine() : createProductionEngine()
   registerIpcHandlers(engine)
 
   setInterval(() => {

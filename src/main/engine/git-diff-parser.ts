@@ -1,10 +1,20 @@
 import type { FileDiff, FileDiffStatus } from '../../shared/ipc-contract'
 
 const FILE_HEADER = /^diff --git a\/(.+) b\/(.+)$/
+const OLD_PATH_LINE = /^--- a\/(.+)$/
+const NEW_PATH_LINE = /^\+\+\+ b\/(.+)$/
+const RENAME_FROM_LINE = /^rename from (.+)$/
+const RENAME_TO_LINE = /^rename to (.+)$/
 
 interface InProgressFile {
-  aPath: string
-  bPath: string
+  // Fallback path source only: the "diff --git a/X b/Y" header line is
+  // genuinely ambiguous when a path itself contains " b/" (git emits no
+  // escaping there), so oldPath/newPath below - each their own single,
+  // unambiguous line - take priority whenever present.
+  fallbackAPath: string
+  fallbackBPath: string
+  oldPath: string | null
+  newPath: string | null
   lines: string[]
   added: boolean
   deleted: boolean
@@ -36,7 +46,7 @@ function finalize(file: InProgressFile): FileDiff {
       : file.renamed
         ? 'renamed'
         : 'modified'
-  const path = file.deleted ? file.aPath : file.bPath
+  const path = file.deleted ? (file.oldPath ?? file.fallbackAPath) : (file.newPath ?? file.fallbackBPath)
 
   return { path, status, additions, deletions, diffText: file.lines.join('\n') }
 }
@@ -57,14 +67,38 @@ export function parseUnifiedDiff(raw: string): FileDiff[] {
     const header = FILE_HEADER.exec(line)
     if (header) {
       if (current) files.push(finalize(current))
-      current = { aPath: header[1], bPath: header[2], lines: [line], added: false, deleted: false, renamed: false }
+      current = {
+        fallbackAPath: header[1],
+        fallbackBPath: header[2],
+        oldPath: null,
+        newPath: null,
+        lines: [line],
+        added: false,
+        deleted: false,
+        renamed: false
+      }
       continue
     }
     if (!current) continue
 
     if (line.startsWith('new file mode')) current.added = true
     else if (line.startsWith('deleted file mode')) current.deleted = true
-    else if (line.startsWith('rename from') || line.startsWith('rename to')) current.renamed = true
+
+    const oldPathMatch = OLD_PATH_LINE.exec(line)
+    if (oldPathMatch) current.oldPath = oldPathMatch[1]
+    const newPathMatch = NEW_PATH_LINE.exec(line)
+    if (newPathMatch) current.newPath = newPathMatch[1]
+
+    const renameFromMatch = RENAME_FROM_LINE.exec(line)
+    if (renameFromMatch) {
+      current.renamed = true
+      current.oldPath = renameFromMatch[1]
+    }
+    const renameToMatch = RENAME_TO_LINE.exec(line)
+    if (renameToMatch) {
+      current.renamed = true
+      current.newPath = renameToMatch[1]
+    }
 
     current.lines.push(line)
   }

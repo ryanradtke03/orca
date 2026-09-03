@@ -147,6 +147,40 @@ describe('parseUnifiedDiff', () => {
     expect(file.deletions).toBe(1)
   })
 
+  it('resolves the real path from --- / +++ lines rather than the ambiguous "diff --git" header for a filename containing " b/"', () => {
+    // Git's "diff --git a/X b/Y" line has no escaping, so a path containing
+    // the literal substring " b/" makes a naive a-path/b-path regex capture
+    // the wrong thing. The --- / +++ lines are each a single, unambiguous
+    // "prefix + rest-of-line" path instead.
+    const raw = [
+      'diff --git a/foo b/bar.ts b/foo b/bar.ts',
+      'index 1234567..89abcde 100644',
+      '--- a/foo b/bar.ts',
+      '+++ b/foo b/bar.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new'
+    ].join('\n')
+
+    const [file] = parseUnifiedDiff(raw)
+
+    expect(file.path).toBe('foo b/bar.ts')
+  })
+
+  it('resolves a rename purely from rename from/to lines when there are no --- / +++ lines', () => {
+    const raw = [
+      'diff --git a/old-name.ts b/new-name.ts',
+      'similarity index 100%',
+      'rename from old-name.ts',
+      'rename to new-name.ts'
+    ].join('\n')
+
+    const [file] = parseUnifiedDiff(raw)
+
+    expect(file.path).toBe('new-name.ts')
+    expect(file.status).toBe('renamed')
+  })
+
   it('handles a binary file diff without crashing and without counting line changes', () => {
     const raw = [
       'diff --git a/image.png b/image.png',

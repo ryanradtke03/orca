@@ -30,6 +30,8 @@ export interface Session {
   projectId: string
   worktreePath: string
   branch: string
+  // The commit the worktree's branch forked from - what its Diff is compared against.
+  baseRef: string
   pid: number
   status: SessionStatus
   pendingPrompt?: PendingPrompt

@@ -27,10 +27,6 @@ const ACTIVE_STATUSES: ReadonlySet<Session['status']> = new Set([
 export function createEngine(adapters: EngineAdapters): Engine {
   let projects: Project[] | undefined
   let sessions: Session[] = []
-  // The commit each session's worktree branch forked from, so getDiff knows
-  // what to diff against. Keyed separately from Session (rather than added to
-  // it) since it's Git-adapter bookkeeping, not something the renderer needs.
-  const worktreeBaseRefs = new Map<string, string>()
   // Serializes addProject calls, and reads that must not observe a write mid-flight,
   // so a concurrent read-modify-write can't drop a write or return a stale project list.
   let writeQueue: Promise<unknown> = Promise.resolve()
@@ -85,11 +81,11 @@ export function createEngine(adapters: EngineAdapters): Engine {
         projectId,
         worktreePath,
         branch,
+        baseRef,
         pid,
         status: 'running'
       }
       sessions = [...sessions, session]
-      worktreeBaseRefs.set(session.id, baseRef)
 
       return session
     })
@@ -100,12 +96,8 @@ export function createEngine(adapters: EngineAdapters): Engine {
     if (!session) {
       throw new Error(`Unknown session: ${sessionId}`)
     }
-    const baseRef = worktreeBaseRefs.get(sessionId)
-    if (!baseRef) {
-      throw new Error(`No base ref recorded for session: ${sessionId}`)
-    }
 
-    return adapters.git.getDiff(session.worktreePath, baseRef)
+    return adapters.git.getDiff(session.worktreePath, session.baseRef)
   }
 
   function refreshSessionStatuses(): Promise<Session[]> {

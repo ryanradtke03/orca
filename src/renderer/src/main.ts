@@ -402,6 +402,9 @@ function renderApp(): void {
     void renderDiffView(currentView.sessionId)
     return
   }
+  // Invalidates any diff fetch still in flight, so it can't resolve after
+  // the user has navigated back and clobber the dashboard they're now on.
+  diffRequestToken++
   renderDashboard(latestProjects, latestSessions)
 }
 

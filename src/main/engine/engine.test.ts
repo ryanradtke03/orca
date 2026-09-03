@@ -644,7 +644,7 @@ describe('Engine.getDiff', () => {
 
     await engine.getDiff(spawned.id)
 
-    expect(git.getDiffCalls).toEqual([{ worktreePath: spawned.worktreePath, baseRef: 'base-1' }])
+    expect(git.getDiffCalls).toEqual([{ worktreePath: spawned.worktreePath, baseRef: spawned.baseRef }])
   })
 
   it('returns the file diffs reported by the Git adapter', async () => {
@@ -684,6 +684,6 @@ describe('Engine.getDiff', () => {
 
     await engine.getDiff(spawned.id)
 
-    expect(git.getDiffCalls).toEqual([{ worktreePath: spawned.worktreePath, baseRef: 'base-1' }])
+    expect(git.getDiffCalls).toEqual([{ worktreePath: spawned.worktreePath, baseRef: spawned.baseRef }])
   })
 })
