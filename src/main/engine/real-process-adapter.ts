@@ -13,8 +13,13 @@ import { extractPromptText, renderScreen, TERMINAL_COLS, TERMINAL_ROWS } from '.
 const execFileAsync = promisify(execFile)
 
 const POLL_INTERVAL_MS = 300
-const RESOLVE_PID_TIMEOUT_MS = 5000
-const RESOLVE_PID_RETRY_MS = 100
+// A real project's `claude --bg` startup (CLAUDE.md discovery, hooks, MCP
+// servers) - and, on a machine with a lot of session history, the `agents`
+// listing itself - can take much longer than a bare-repo test does. This
+// needs to be generous: timing out here used to `stop` the session, which
+// permanently killed ones that just needed more time to start.
+const RESOLVE_PID_TIMEOUT_MS = 30_000
+const RESOLVE_PID_RETRY_MS = 200
 const RESPOND_TIMEOUT_MS = 5000
 
 // The CLI prints this line (and exits immediately) once a background session
@@ -97,6 +102,11 @@ export function createRealProcessAdapter(
           tracked.alive = false
           tracked.exitCode = entry?.state === 'done' ? 0 : 1
           tracked.pendingPrompt = null
+          // Best-effort: without this, every session Orca ever spawns stays
+          // in the CLI's own history forever, which both clutters `claude
+          // agents` and (on a machine with a lot of accumulated history)
+          // appears to slow down listing itself.
+          if (entry) void execFileAsync(command, ['rm', tracked.id]).catch(() => {})
           continue
         }
 
@@ -128,10 +138,10 @@ export function createRealProcessAdapter(
       if (pid !== undefined) return pid
 
       if (Date.now() >= deadline) {
-        // The session is presumably still running under `--bg` even though
-        // we can't find it - don't leave it orphaned just because we're
-        // about to report spawning as having failed.
-        await execFileAsync(command, ['stop', id]).catch(() => {})
+        // Deliberately don't `stop` the session here: it may simply still be
+        // starting, and killing it on a timeout only turns a slow start into
+        // a guaranteed, permanent one - the caller can retry or the session
+        // can still be picked up later (e.g. by Discovery).
         throw new Error(`Spawned background session "${id}" is not listed by \`claude agents\``)
       }
       await new Promise((resolve) => setTimeout(resolve, RESOLVE_PID_RETRY_MS))
