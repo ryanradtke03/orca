@@ -4,10 +4,10 @@ import { mkdtemp, realpath, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createAgentStatusLister } from './agent-status'
-import { createRealProcessAdapter } from './real-process-adapter'
+import { createAgentStatusLister } from '../../claude-cli/agent-status'
+import { createRealProcessAdapter } from './real'
 
-const FAKE_CLI = join(__dirname, 'real-process-adapter.fake-cli.cjs')
+const FAKE_CLI = join(__dirname, '../../claude-cli/fake-cli.cjs')
 
 interface FakeEntry {
   id: string

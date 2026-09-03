@@ -1,5 +1,5 @@
 import { Notification as ElectronNotification } from 'electron'
-import type { Notification, NotificationAdapter } from './adapters'
+import type { Notification, NotificationAdapter } from '../../adapters'
 
 export function createRealNotificationAdapter(): NotificationAdapter {
   return {

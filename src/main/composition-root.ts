@@ -1,12 +1,12 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { createEngine, type Engine } from './engine/engine'
-import { createRealDiscoveryAdapter } from './engine/real-discovery-adapter'
-import { createRealGitAdapter } from './engine/real-git-adapter'
-import { createRealGitHubAdapter } from './engine/real-github-adapter'
-import { createRealNotificationAdapter } from './engine/real-notification-adapter'
-import { createRealPersistenceAdapter } from './engine/real-persistence-adapter'
-import { createRealProcessAdapter } from './engine/real-process-adapter'
+import { createRealDiscoveryAdapter } from './engine/adapters/discovery/real'
+import { createRealGitAdapter } from './engine/adapters/git/real'
+import { createRealGitHubAdapter } from './engine/adapters/github/real'
+import { createRealNotificationAdapter } from './engine/adapters/notification/real'
+import { createRealPersistenceAdapter } from './engine/adapters/persistence/real'
+import { createRealProcessAdapter } from './engine/adapters/process/real'
 
 export function createProductionEngine(): Engine {
   const stateFilePath = join(app.getPath('userData'), 'orca-state.json')

@@ -1,4 +1,4 @@
-import type { FileDiff, FileDiffStatus } from '../../shared/ipc-contract'
+import type { FileDiff, FileDiffStatus } from '../../../../shared/ipc-contract'
 
 const FILE_HEADER = /^diff --git a\/(.+) b\/(.+)$/
 const OLD_PATH_LINE = /^--- a\/(.+)$/

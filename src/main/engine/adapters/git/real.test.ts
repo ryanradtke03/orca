@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createRealGitAdapter } from './real-git-adapter'
+import { createRealGitAdapter } from './real'
 
 const execFileAsync = promisify(execFile)
 

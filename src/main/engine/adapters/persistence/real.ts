@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'fs/promises'
-import type { Project } from '../../shared/ipc-contract'
-import type { PersistenceAdapter } from './adapters'
+import type { Project } from '../../../../shared/ipc-contract'
+import type { PersistenceAdapter } from '../../adapters'
 
 // mergeMode is optional here (unlike on Project) because a project persisted
 // before Merge mode existed has no such field on disk.

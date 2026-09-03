@@ -1,5 +1,5 @@
-import type { Project } from '../../shared/ipc-contract'
-import type { PersistenceAdapter } from './adapters'
+import type { Project } from '../../../../shared/ipc-contract'
+import type { PersistenceAdapter } from '../../adapters'
 
 export function createFakePersistenceAdapter(
   seed: { sessionCount?: number; projects?: Project[] } = {}

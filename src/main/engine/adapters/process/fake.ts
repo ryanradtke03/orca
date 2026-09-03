@@ -1,4 +1,4 @@
-import type { PendingPrompt, ProcessAdapter, ProcessInfo } from './adapters'
+import type { PendingPrompt, ProcessAdapter, ProcessInfo } from '../../adapters'
 
 export interface FakeProcessAdapter extends ProcessAdapter {
   simulateExit(pid: number, code: number | null): void

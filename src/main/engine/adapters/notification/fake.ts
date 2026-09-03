@@ -1,4 +1,4 @@
-import type { Notification, NotificationAdapter } from './adapters'
+import type { Notification, NotificationAdapter } from '../../adapters'
 
 export interface FakeNotificationAdapter extends NotificationAdapter {
   notifications: Notification[]

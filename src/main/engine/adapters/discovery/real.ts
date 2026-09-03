@@ -4,15 +4,15 @@ import { open, readdir } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
-import type { PendingPrompt, PendingPromptType, SessionStatus } from '../../shared/ipc-contract'
-import type { DiscoveredSession, DiscoveryAdapter } from './adapters'
+import type { PendingPrompt, PendingPromptType, SessionStatus } from '../../../../shared/ipc-contract'
+import type { DiscoveredSession, DiscoveryAdapter } from '../../adapters'
 import {
   createAgentStatusLister,
   promptTypeFromStatus,
   type AgentStatusEntry,
   type ListAgentStatuses
-} from './agent-status'
-import { extractPromptText, renderScreen } from './prompt-text'
+} from '../../claude-cli/agent-status'
+import { extractPromptText, renderScreen } from '../../claude-cli/prompt-text'
 
 const execFileAsync = promisify(execFile)
 

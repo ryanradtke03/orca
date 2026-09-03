@@ -1,4 +1,4 @@
-import type { FileDiff, GitAdapter } from './adapters'
+import type { FileDiff, GitAdapter } from '../../adapters'
 
 export interface FakeGitAdapter extends GitAdapter {
   getDiffCalls: { worktreePath: string; baseRef: string }[]

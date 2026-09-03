@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import type { PendingPromptType } from '../../shared/ipc-contract'
+import type { PendingPromptType } from '../../../shared/ipc-contract'
 
 const execFileAsync = promisify(execFile)
 

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createRealPersistenceAdapter } from './real-persistence-adapter'
+import { createRealPersistenceAdapter } from './real'
 
 describe('createRealPersistenceAdapter', () => {
   let dir: string
