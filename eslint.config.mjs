@@ -7,7 +7,8 @@ export default tseslint.config(
       'out/**',
       'dist/**',
       'node_modules/**',
-      'src/main/engine/real-process-adapter.detach-harness.cjs'
+      'scripts/fix-node-pty-permissions.cjs',
+      'src/main/engine/real-process-adapter.fake-cli.cjs'
     ]
   },
   js.configs.recommended,

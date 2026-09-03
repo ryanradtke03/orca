@@ -1,15 +1,25 @@
-import { execFile } from 'child_process'
-import { existsSync } from 'fs'
-import { mkdtemp, readFile, realpath, rm } from 'fs/promises'
+import { readFileSync, writeFileSync } from 'fs'
+import { mkdtemp, realpath, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { promisify } from 'util'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createAgentStatusLister } from './agent-status'
 import { createRealProcessAdapter } from './real-process-adapter'
 
-const execFileAsync = promisify(execFile)
+const FAKE_CLI = join(__dirname, 'real-process-adapter.fake-cli.cjs')
 
-async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+interface FakeEntry {
+  id: string
+  pid: number
+  cwd: string
+  status: 'idle' | 'busy' | 'waiting'
+  waitingFor?: string
+  processState: 'blocked' | 'done'
+  screen: string
+  responses?: string[]
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
   const start = Date.now()
   while (!predicate()) {
     if (Date.now() - start > timeoutMs) {
@@ -30,82 +40,110 @@ function isOsProcessAlive(pid: number): boolean {
 
 describe('createRealProcessAdapter', () => {
   let dir: string
+  let statePath: string
+
+  function readEntries(): FakeEntry[] {
+    return JSON.parse(readFileSync(statePath, 'utf-8')).entries
+  }
+
+  function writeEntries(entries: FakeEntry[]): void {
+    writeFileSync(statePath, JSON.stringify({ entries }))
+  }
+
+  function entryForPid(pid: number): FakeEntry {
+    const entry = readEntries().find((candidate) => candidate.pid === pid)
+    if (!entry) throw new Error(`no fake-cli entry for pid ${pid}`)
+    return entry
+  }
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'orca-process-'))
+    statePath = join(dir, 'fake-cli-state.json')
+    writeEntries([])
+    process.env.ORCA_FAKE_CLI_STATE = statePath
   })
 
   afterEach(async () => {
+    for (const entry of readEntries()) {
+      try {
+        process.kill(entry.pid, 'SIGKILL')
+      } catch {
+        // already gone
+      }
+    }
+    delete process.env.ORCA_FAKE_CLI_STATE
     await rm(dir, { recursive: true, force: true })
   })
 
-  it('spawns the process rooted at the given directory', async () => {
-    const adapter = createRealProcessAdapter('node', [
-      '-e',
-      "require('fs').writeFileSync('cwd-marker.txt', process.cwd())"
-    ])
-
-    await adapter.spawnClaude(dir)
-
-    await waitUntil(() => existsSync(join(dir, 'cwd-marker.txt')))
-    const written = await readFile(join(dir, 'cwd-marker.txt'), 'utf-8')
-    expect(written).toBe(await realpath(dir))
-  })
-
-  it('reports the process alive right after spawning, then not alive with its exit code once it exits', async () => {
-    const adapter = createRealProcessAdapter('node', ['-e', 'process.exit(7)'])
+  it('spawns the session rooted at the given directory', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
 
     const { pid } = await adapter.spawnClaude(dir)
 
+    expect(entryForPid(pid).cwd).toBe(await realpath(dir))
+  })
+
+  it('reports the session alive right after spawning, then not alive once it finishes', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+
+    const { pid } = await adapter.spawnClaude(dir)
     expect(adapter.isAlive(pid)).toBe(true)
     expect(adapter.exitCode(pid)).toBeNull()
 
-    await waitUntil(() => !adapter.isAlive(pid))
+    const entry = entryForPid(pid)
+    entry.processState = 'done'
+    writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
+    process.kill(pid, 'SIGTERM')
 
-    expect(adapter.exitCode(pid)).toBe(7)
+    await waitUntil(() => !adapter.isAlive(pid))
+    expect(adapter.exitCode(pid)).toBe(0)
   })
 
-  it('stops a running process, marking it not alive', async () => {
-    const adapter = createRealProcessAdapter('node', ['-e', 'setTimeout(() => {}, 5000)'])
+  it('reports a session as errored if its process disappears without finishing', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+
+    const { pid } = await adapter.spawnClaude(dir)
+    process.kill(pid, 'SIGKILL')
+
+    await waitUntil(() => !adapter.isAlive(pid))
+    expect(adapter.exitCode(pid)).toBe(1)
+  })
+
+  it('stops a running session, marking it not alive', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
 
     const { pid } = await adapter.spawnClaude(dir)
     expect(adapter.isAlive(pid)).toBe(true)
 
     await adapter.stop(pid)
 
-    await waitUntil(() => !adapter.isAlive(pid))
-    expect(isOsProcessAlive(pid)).toBe(false)
+    await waitUntil(() => !isOsProcessAlive(pid))
   })
 
-  it('resolves without throwing when stopping a pid that is already gone', async () => {
-    const adapter = createRealProcessAdapter('node', ['-e', 'process.exit(0)'])
+  it('resolves without throwing when stopping a pid it never tracked', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
 
-    const { pid } = await adapter.spawnClaude(dir)
-    await waitUntil(() => !adapter.isAlive(pid))
-
-    await expect(adapter.stop(pid)).resolves.toBeUndefined()
+    await expect(adapter.stop(999_999)).resolves.toBeUndefined()
   })
 
-  it('reports no pending prompt while the process has only printed plain output', async () => {
-    const adapter = createRealProcessAdapter('node', [
-      '-e',
-      "process.stdout.write('Reading files...\\n'); setTimeout(() => {}, 5000)"
-    ])
+  it('reports no pending prompt while the session is idle', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
 
     const { pid } = await adapter.spawnClaude(dir)
 
-    await waitUntil(() => adapter.isAlive(pid))
+    await new Promise((resolve) => setTimeout(resolve, 400))
     expect(adapter.pendingPrompt(pid)).toBeNull()
   })
 
-  it('detects a permission prompt once the process prints one to stdout', async () => {
-    const script = [
-      "process.stdout.write('Do you want to proceed?\\n\\u276f 1. Yes\\n  2. No\\n')",
-      'setTimeout(() => {}, 5000)'
-    ].join('; ')
-    const adapter = createRealProcessAdapter('node', ['-e', script])
-
+  it('detects a permission prompt once the session reports waiting on one', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
     const { pid } = await adapter.spawnClaude(dir)
+
+    const entry = entryForPid(pid)
+    entry.status = 'waiting'
+    entry.waitingFor = 'permission prompt'
+    entry.screen = 'Bash command\r\n\r\n  npm install\r\n\r\nDo you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n'
+    writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
 
     await waitUntil(() => adapter.pendingPrompt(pid) !== null)
     expect(adapter.pendingPrompt(pid)).toEqual({
@@ -114,21 +152,39 @@ describe('createRealProcessAdapter', () => {
     })
   })
 
-  it('sends a response to the process stdin and clears the pending prompt', async () => {
-    const responseMarker = join(dir, 'response.txt')
-    const script = [
-      "process.stdout.write('Do you want to proceed?\\n\\u276f 1. Yes\\n  2. No\\n')",
-      `process.stdin.on('data', (d) => { require('fs').writeFileSync(${JSON.stringify(responseMarker)}, d.toString()); process.exit(0) })`
-    ].join('; ')
-    const adapter = createRealProcessAdapter('node', ['-e', script])
-
+  it('detects an input prompt once the session reports waiting on one', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
     const { pid } = await adapter.spawnClaude(dir)
+
+    const entry = entryForPid(pid)
+    entry.status = 'waiting'
+    entry.waitingFor = 'input needed'
+    entry.screen = 'Which auth approach should I use?\r\n❯ 1. OAuth\r\n  2. API key\r\n'
+    writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
+
+    await waitUntil(() => adapter.pendingPrompt(pid) !== null)
+    expect(adapter.pendingPrompt(pid)).toEqual({
+      type: 'input',
+      text: expect.stringContaining('Which auth approach')
+    })
+  })
+
+  it('sends a response through a pty attach and clears the pending prompt', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+    const { pid } = await adapter.spawnClaude(dir)
+
+    const entry = entryForPid(pid)
+    entry.status = 'waiting'
+    entry.waitingFor = 'permission prompt'
+    entry.screen = 'Do you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n'
+    writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
     await waitUntil(() => adapter.pendingPrompt(pid) !== null)
 
-    await adapter.respond(pid, 'yes')
+    await adapter.respond(pid, '1')
 
-    await waitUntil(() => existsSync(responseMarker))
-    expect(await readFile(responseMarker, 'utf-8')).toBe('yes\n')
+    // The pty's line discipline translates the \r we write into \n by the
+    // time the other side reads it.
+    expect(entryForPid(pid).responses).toEqual(['1\n'])
     expect(adapter.pendingPrompt(pid)).toBeNull()
   })
 
@@ -138,37 +194,37 @@ describe('createRealProcessAdapter', () => {
     await expect(adapter.spawnClaude(dir)).rejects.toThrow()
   })
 
-  it('spawns a detached process that keeps running after its immediate parent exits', async () => {
-    const harnessPath = join(__dirname, 'real-process-adapter.detach-harness.cjs')
-    const targetArgs = ['-e', 'setTimeout(() => {}, 5000)']
-
-    const startedAt = Date.now()
-    const { stdout } = await execFileAsync('node', [
-      harnessPath,
-      'node',
-      JSON.stringify(targetArgs),
-      dir
-    ])
-    const harnessDurationMs = Date.now() - startedAt
-
-    const pid = Number(stdout.trim())
-    try {
-      expect(Number.isInteger(pid)).toBe(true)
-
-      // The harness (standing in for Orca) has already fully exited at this
-      // point, since execFile only resolves once its process closes. It spawned
-      // its target with the same detached + unref() configuration
-      // real-process-adapter uses, so the target should have outlived it.
-      expect(harnessDurationMs).toBeLessThan(2000)
-      expect(isOsProcessAlive(pid)).toBe(true)
-    } finally {
-      if (Number.isInteger(pid)) {
-        try {
-          process.kill(pid, 'SIGKILL')
-        } catch {
-          // already exited
-        }
+  it('survives a transient failure listing agent statuses without marking sessions crashed', async () => {
+    const realList = createAgentStatusLister(FAKE_CLI)
+    let failNext = false
+    const flakyList = async (): ReturnType<typeof realList> => {
+      if (failNext) {
+        failNext = false
+        throw new Error('simulated transient failure')
       }
+      return realList()
     }
+
+    const adapter = createRealProcessAdapter(FAKE_CLI, [], flakyList)
+    const { pid } = await adapter.spawnClaude(dir)
+    expect(adapter.isAlive(pid)).toBe(true)
+
+    failNext = true
+    // Give the poll timer a few ticks to run into (and recover from) the
+    // simulated failure.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    expect(adapter.isAlive(pid)).toBe(true)
+    expect(adapter.exitCode(pid)).toBeNull()
+  })
+
+  it('does not attempt to respond to a session that is no longer alive', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+    const { pid } = await adapter.spawnClaude(dir)
+
+    process.kill(pid, 'SIGKILL')
+    await waitUntil(() => !adapter.isAlive(pid))
+
+    await expect(adapter.respond(pid, '1')).resolves.toBeUndefined()
   })
 })
