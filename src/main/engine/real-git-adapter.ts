@@ -18,6 +18,10 @@ export function createRealGitAdapter(worktreesRootDir: string): GitAdapter {
       })
 
       return { worktreePath, branch }
+    },
+
+    async removeWorktree(projectPath: string, worktreePath: string) {
+      await execFileAsync('git', ['worktree', 'remove', worktreePath], { cwd: projectPath })
     }
   }
 }
