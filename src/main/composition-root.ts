@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { createEngine, type Engine } from './engine/engine'
+import { createRealDiscoveryAdapter } from './engine/real-discovery-adapter'
 import { createRealGitAdapter } from './engine/real-git-adapter'
 import { createRealGitHubAdapter } from './engine/real-github-adapter'
 import { createRealNotificationAdapter } from './engine/real-notification-adapter'
@@ -17,6 +18,7 @@ export function createProductionEngine(): Engine {
   const claudeProcess = createRealProcessAdapter('claude')
   const notification = createRealNotificationAdapter()
   const github = createRealGitHubAdapter()
+  const discovery = createRealDiscoveryAdapter('claude')
 
-  return createEngine({ persistence, git, process: claudeProcess, notification, github })
+  return createEngine({ persistence, git, process: claudeProcess, notification, github, discovery })
 }

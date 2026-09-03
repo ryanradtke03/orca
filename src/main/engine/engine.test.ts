@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createEngine } from './engine'
+import { createFakeDiscoveryAdapter } from './fake-discovery-adapter'
 import { createFakeGitAdapter } from './fake-git-adapter'
 import { createFakeGitHubAdapter } from './fake-github-adapter'
 import { createFakeNotificationAdapter } from './fake-notification-adapter'
@@ -13,7 +14,8 @@ describe('Engine.ping', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const result = await engine.ping()
 
@@ -26,7 +28,8 @@ describe('Engine.ping', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const result = await engine.ping()
 
@@ -41,7 +44,8 @@ describe('Engine.listProjects', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.listProjects()).resolves.toEqual([])
   })
@@ -53,7 +57,8 @@ describe('Engine.listProjects', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.listProjects()).resolves.toEqual(seeded)
   })
@@ -66,7 +71,8 @@ describe('Engine.addProject', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const project = await engine.addProject('/tmp/my-project')
 
@@ -80,7 +86,8 @@ describe('Engine.addProject', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const first = await engine.addProject('/tmp/one')
     const second = await engine.addProject('/tmp/two')
@@ -95,7 +102,8 @@ describe('Engine.addProject', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await engine.addProject('/tmp/bar')
 
@@ -111,11 +119,12 @@ describe('Engine.addProject', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await engine.addProject('/tmp/my-project')
 
-    const freshEngine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const freshEngine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     await expect(freshEngine.listProjects()).resolves.toHaveLength(1)
   })
 
@@ -125,7 +134,8 @@ describe('Engine.addProject', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const [first, second] = await Promise.all([
       engine.addProject('/tmp/one'),
@@ -145,7 +155,8 @@ describe('Engine.createWorktree', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const result = await engine.createWorktree('/tmp/my-project')
 
@@ -162,7 +173,8 @@ describe('Engine.createWorktree', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const first = await engine.createWorktree('/tmp/my-project')
     const second = await engine.createWorktree('/tmp/my-project')
@@ -180,7 +192,8 @@ describe('Engine.spawnSession', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const session = await engine.spawnSession('project-1')
 
@@ -203,7 +216,8 @@ describe('Engine.spawnSession', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const session = await engine.spawnSession('project-1')
 
@@ -216,7 +230,8 @@ describe('Engine.spawnSession', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.spawnSession('missing')).rejects.toThrow('Unknown project: missing')
   })
@@ -228,7 +243,8 @@ describe('Engine.spawnSession', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const first = await engine.spawnSession('project-1')
     const second = await engine.spawnSession('project-1')
@@ -246,7 +262,8 @@ describe('Engine.listSessions', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.listSessions()).resolves.toEqual([])
   })
@@ -258,7 +275,8 @@ describe('Engine.listSessions', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const session = await engine.spawnSession('project-1')
 
@@ -273,7 +291,8 @@ describe('Engine.stopSession', () => {
     const git = createFakeGitAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const session = await engine.spawnSession('project-1')
 
@@ -312,7 +331,8 @@ describe('Engine.stopSession', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const session = await engine.spawnSession('project-1')
 
     await engine.stopSession(session.id)
@@ -337,7 +357,8 @@ describe('Engine.stopSession', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.stopSession('missing')).rejects.toThrow('Unknown session: missing')
   })
@@ -349,7 +370,8 @@ describe('Engine.stopSession', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const first = await engine.spawnSession('project-1')
     const second = await engine.spawnSession('project-1')
@@ -367,13 +389,41 @@ describe('Engine.stopSession', () => {
 describe('Engine.refreshSessionStatuses', () => {
   const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
 
+  it('keeps polling a discovered Session that started out idle, not just ones spawned running', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    // A process already alive and known to the Process adapter, but not yet
+    // an Engine Session - exactly what Discovery hands off.
+    const { pid } = await processAdapter.spawnClaude('/tmp/my-project')
+    discovery.simulateSession({
+      pid,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'idle-branch',
+      baseRef: 'abc123',
+      status: 'idle'
+    })
+    await engine.discoverSessions()
+
+    processAdapter.simulateExit(pid, 0)
+    const [session] = await engine.refreshSessionStatuses()
+
+    expect(session.status).toBe('done')
+  })
+
   it('leaves a session running while its process is still alive, without notifying', async () => {
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await engine.spawnSession('project-1')
     const [session] = await engine.refreshSessionStatuses()
@@ -388,7 +438,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
@@ -406,7 +457,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 1)
@@ -424,7 +476,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, null)
@@ -439,7 +492,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 1)
@@ -456,7 +510,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
@@ -472,7 +527,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
@@ -487,7 +543,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 1)
@@ -502,7 +559,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const first = await engine.spawnSession('project-1')
     const second = await engine.spawnSession('project-1')
@@ -520,7 +578,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
@@ -537,7 +596,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulatePrompt(spawned.pid, { type: 'input', text: 'Which branch?' })
@@ -554,7 +614,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
@@ -571,7 +632,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
@@ -590,7 +652,8 @@ describe('Engine.refreshSessionStatuses', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
@@ -613,7 +676,8 @@ describe('Engine.respondToPrompt', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
@@ -630,7 +694,8 @@ describe('Engine.respondToPrompt', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulatePrompt(spawned.pid, { type: 'permission', text: 'Run npm install?' })
@@ -648,7 +713,8 @@ describe('Engine.respondToPrompt', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.respondToPrompt('missing', 'yes')).rejects.toThrow(
       'Unknown session: missing'
@@ -661,7 +727,8 @@ describe('Engine.respondToPrompt', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const spawned = await engine.spawnSession('project-1')
 
@@ -680,7 +747,8 @@ describe('Engine.getDiff', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
 
     await engine.getDiff(spawned.id)
@@ -694,7 +762,8 @@ describe('Engine.getDiff', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
     const files = [
       { path: 'foo.ts', status: 'modified' as const, additions: 3, deletions: 1, diffText: '...' }
@@ -710,7 +779,8 @@ describe('Engine.getDiff', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.getDiff('missing')).rejects.toThrow('Unknown session: missing')
   })
@@ -721,7 +791,8 @@ describe('Engine.getDiff', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
     await engine.refreshSessionStatuses()
@@ -741,7 +812,8 @@ describe('Engine.setProjectMergeMode', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const project = await engine.addProject('/tmp/my-project')
 
@@ -754,7 +826,8 @@ describe('Engine.setProjectMergeMode', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     const updated = await engine.setProjectMergeMode('project-1', 'local-merge')
 
@@ -767,7 +840,8 @@ describe('Engine.setProjectMergeMode', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await engine.setProjectMergeMode('project-1', 'pull-request')
 
@@ -785,7 +859,8 @@ describe('Engine.setProjectMergeMode', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await engine.setProjectMergeMode('project-1', 'local-merge')
 
@@ -799,7 +874,8 @@ describe('Engine.setProjectMergeMode', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.setProjectMergeMode('missing', 'local-merge')).rejects.toThrow(
       'Unknown project: missing'
@@ -815,7 +891,8 @@ describe('Engine.requestMerge', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
     await engine.refreshSessionStatuses()
@@ -837,7 +914,8 @@ describe('Engine.requestMerge', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
     await engine.refreshSessionStatuses()
@@ -861,7 +939,8 @@ describe('Engine.requestMerge', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
     await engine.refreshSessionStatuses()
@@ -885,6 +964,7 @@ describe('Engine.requestMerge', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
     const calls: string[] = []
     const originalPushBranch = git.pushBranch.bind(git)
     git.pushBranch = async (worktreePath, branch) => {
@@ -896,7 +976,7 @@ describe('Engine.requestMerge', () => {
       calls.push('open-pr')
       return originalOpenPullRequest(params)
     }
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
     processAdapter.simulateExit(spawned.pid, 0)
     await engine.refreshSessionStatuses()
@@ -912,7 +992,8 @@ describe('Engine.requestMerge', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
 
     await expect(engine.requestMerge('missing')).rejects.toThrow('Unknown session: missing')
   })
@@ -924,9 +1005,400 @@ describe('Engine.requestMerge', () => {
     const processAdapter = createFakeProcessAdapter()
     const notification = createFakeNotificationAdapter()
     const github = createFakeGitHubAdapter()
-    const engine = createEngine({ persistence, git, process: processAdapter, notification, github })
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
     const spawned = await engine.spawnSession('project-1')
 
     await expect(engine.requestMerge(spawned.id)).rejects.toThrow(`Session is not finished: ${spawned.id}`)
+  })
+})
+
+describe('Engine.discoverSessions', () => {
+  it('returns an empty list when nothing is discovered and nothing is tracked', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await expect(engine.discoverSessions()).resolves.toEqual([])
+  })
+
+  it('adds a discovered session to an existing Project matched by path', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'work-in-progress',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const sessions = await engine.discoverSessions()
+
+    expect(sessions).toEqual([
+      {
+        id: expect.any(String),
+        projectId: 'project-1',
+        worktreePath: '/tmp/my-project',
+        branch: 'work-in-progress',
+        baseRef: 'abc123',
+        pid: 4242,
+        status: 'running',
+        pendingPrompt: undefined
+      }
+    ])
+  })
+
+  it('surfaces the discovered session through listSessions afterward', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'work-in-progress',
+      baseRef: 'abc123',
+      status: 'idle'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await engine.discoverSessions()
+
+    await expect(engine.listSessions()).resolves.toEqual([
+      expect.objectContaining({ pid: 4242, status: 'idle' })
+    ])
+  })
+
+  it('creates a new Project when no existing Project matches the discovered project path', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/unlisted-project',
+      projectPath: '/tmp/unlisted-project',
+      branch: 'main',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const [session] = await engine.discoverSessions()
+
+    const projects = await engine.listProjects()
+    expect(projects).toEqual([
+      { id: expect.any(String), path: '/tmp/unlisted-project', name: 'unlisted-project', mergeMode: 'manual' }
+    ])
+    expect(session.projectId).toBe(projects[0].id)
+  })
+
+  it('persists a newly created Project so a fresh Engine sees it too', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/unlisted-project',
+      projectPath: '/tmp/unlisted-project',
+      branch: 'main',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    await engine.discoverSessions()
+
+    const freshEngine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    await expect(freshEngine.listProjects()).resolves.toHaveLength(1)
+  })
+
+  it('creates only one new Project for two discovered sessions that share the same project path', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 1111,
+      cwd: '/tmp/shared-project/worktree-a',
+      projectPath: '/tmp/shared-project',
+      branch: 'branch-a',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    discovery.simulateSession({
+      pid: 2222,
+      cwd: '/tmp/shared-project/worktree-b',
+      projectPath: '/tmp/shared-project',
+      branch: 'branch-b',
+      baseRef: 'def456',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const sessions = await engine.discoverSessions()
+
+    const projects = await engine.listProjects()
+    expect(projects).toHaveLength(1)
+    expect(sessions.map((s) => s.projectId)).toEqual([projects[0].id, projects[0].id])
+  })
+
+  it('does not re-add a session whose pid is already tracked as a spawned Session', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    discovery.simulateSession({
+      pid: spawned.pid,
+      cwd: spawned.worktreePath,
+      projectPath: '/tmp/my-project',
+      branch: spawned.branch,
+      baseRef: spawned.baseRef,
+      status: 'running'
+    })
+
+    const sessions = await engine.discoverSessions()
+
+    expect(sessions).toEqual([spawned])
+  })
+
+  it('does not re-add the same discovered session on a second scan', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'work-in-progress',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await engine.discoverSessions()
+    const sessions = await engine.discoverSessions()
+
+    expect(sessions).toHaveLength(1)
+  })
+
+  it('leaves already-tracked sessions untouched, even if Discovery keeps reporting them', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    discovery.simulateSession({
+      pid: spawned.pid,
+      cwd: spawned.worktreePath,
+      projectPath: '/tmp/my-project',
+      branch: spawned.branch,
+      baseRef: spawned.baseRef,
+      // Deliberately different from the tracked Session's actual status -
+      // refreshSessionStatuses owns keeping status current, not Discovery.
+      status: 'errored'
+    })
+
+    await engine.discoverSessions()
+
+    const sessions = await engine.listSessions()
+    expect(sessions).toEqual([expect.objectContaining({ id: spawned.id, status: 'running' })])
+  })
+
+  it('rediscovers a Session that was spawned in a previous run and is still alive (ADR-0002)', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const firstRunEngine = createEngine({
+      persistence,
+      git,
+      process: processAdapter,
+      notification,
+      github,
+      discovery
+    })
+    const spawnedLastRun = await firstRunEngine.spawnSession('project-1')
+    // A relaunch starts a brand-new in-memory Engine (nothing survives a real
+    // quit except the still-running process itself and what's on disk).
+    const relaunchedEngine = createEngine({
+      persistence,
+      git,
+      process: processAdapter,
+      notification,
+      github,
+      discovery
+    })
+    discovery.simulateSession({
+      pid: spawnedLastRun.pid,
+      cwd: spawnedLastRun.worktreePath,
+      projectPath: '/tmp/my-project',
+      branch: spawnedLastRun.branch,
+      baseRef: spawnedLastRun.baseRef,
+      status: 'running'
+    })
+
+    await relaunchedEngine.discoverSessions()
+
+    const sessions = await relaunchedEngine.listSessions()
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        projectId: 'project-1',
+        worktreePath: spawnedLastRun.worktreePath,
+        branch: spawnedLastRun.branch,
+        pid: spawnedLastRun.pid,
+        status: 'running'
+      })
+    ])
+  })
+
+  it('carries over a pending prompt reported by Discovery', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'work-in-progress',
+      baseRef: 'abc123',
+      status: 'waiting-on-permission',
+      pendingPrompt: { type: 'permission', text: 'Run npm install?' }
+    })
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const [session] = await engine.discoverSessions()
+
+    expect(session.status).toBe('waiting-on-permission')
+    expect(session.pendingPrompt).toEqual({ type: 'permission', text: 'Run npm install?' })
+  })
+
+  it('accumulates sessions discovered together with sessions already tracked', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const spawned = await engine.spawnSession('project-1')
+    discovery.simulateSession({
+      pid: 9999,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'external-branch',
+      baseRef: 'abc123',
+      status: 'running'
+    })
+
+    const sessions = await engine.discoverSessions()
+
+    expect(sessions).toHaveLength(2)
+    expect(sessions.some((s) => s.id === spawned.id)).toBe(true)
+    expect(sessions.some((s) => s.pid === 9999)).toBe(true)
+  })
+
+  it('rediscovers a pid once its old Session has reached a terminal status, rather than treating it as still tracked', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    const finished = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(finished.pid, 0)
+    await engine.refreshSessionStatuses()
+    // The OS is free to reissue a dead process's pid - this simulates a
+    // brand-new, unrelated externally-started session getting it next.
+    discovery.simulateSession({
+      pid: finished.pid,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'reused-pid-branch',
+      baseRef: 'def456',
+      status: 'running'
+    })
+
+    const sessions = await engine.discoverSessions()
+
+    expect(sessions).toEqual([
+      expect.objectContaining({ id: finished.id, status: 'done' }),
+      expect.objectContaining({ pid: finished.pid, branch: 'reused-pid-branch', status: 'running' })
+    ])
+  })
+})
+
+describe('Engine.spawnSession vs Engine.discoverSessions race', () => {
+  it('adopts the Session Discovery already added for a pid, instead of adding a second one', async () => {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter({ pid: 4242 })
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    // Simulates a discovery scan winning the race and registering the pid
+    // spawnSession is about to produce (createFakeProcessAdapter's seed pid)
+    // before spawnSession's own write lands.
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/my-project/worktree-1',
+      projectPath: '/tmp/my-project',
+      branch: 'orca-session-fake-1',
+      baseRef: 'base-1',
+      status: 'running'
+    })
+    const discovered = await engine.discoverSessions()
+
+    const spawned = await engine.spawnSession('project-1')
+
+    expect(spawned).toEqual(discovered[0])
+    await expect(engine.listSessions()).resolves.toHaveLength(1)
   })
 })
