@@ -16,6 +16,7 @@ export function describeStatus(status: SessionStatus): string {
 
 export const STOPPABLE_STATUSES: ReadonlySet<SessionStatus> = new Set([
   'running',
+  'idle',
   'waiting-on-permission',
   'waiting-on-input'
 ])
@@ -30,6 +31,16 @@ export function isAttentionStatus(status: SessionStatus): boolean {
 
 export function isTerminalStatus(status: SessionStatus): boolean {
   return status === 'done' || status === 'errored' || status === 'stopped'
+}
+
+// Mirrors the Engine's RESPONDABLE_STATUSES for idle/waiting-on-input
+// specifically - the always-available message input only ever shows for
+// those two. waiting-on-permission can also receive a message engine-side,
+// but that status renders approve/deny actions instead (see prompt-view.ts).
+const MESSAGE_SENDABLE_STATUSES: ReadonlySet<SessionStatus> = new Set(['idle', 'waiting-on-input'])
+
+export function canSendMessage(status: SessionStatus): boolean {
+  return MESSAGE_SENDABLE_STATUSES.has(status)
 }
 
 // A finished (successfully done) Session is the only one offered for merge -

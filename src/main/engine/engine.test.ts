@@ -201,7 +201,7 @@ describe('Engine.spawnSession', () => {
       projectId: 'project-1',
       worktreePath: '/tmp/my-project/worktree-1',
       branch: 'orca-session-fake-1',
-      status: 'running'
+      status: 'idle'
     })
     expect(session.id).toEqual(expect.any(String))
     expect(session.pid).toEqual(expect.any(Number))
@@ -268,7 +268,7 @@ describe('Engine.listSessions', () => {
     await expect(engine.listSessions()).resolves.toEqual([])
   })
 
-  it('reports a freshly spawned session as running', async () => {
+  it('reports a freshly spawned session as idle - it has no task yet', async () => {
     const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
@@ -280,7 +280,7 @@ describe('Engine.listSessions', () => {
 
     const session = await engine.spawnSession('project-1')
 
-    expect(session.status).toBe('running')
+    expect(session.status).toBe('idle')
   })
 })
 
@@ -381,7 +381,7 @@ describe('Engine.stopSession', () => {
     const sessions = await engine.listSessions()
     expect(sessions).toEqual([
       expect.objectContaining({ id: first.id, status: 'stopped' }),
-      expect.objectContaining({ id: second.id, status: 'running' })
+      expect.objectContaining({ id: second.id, status: 'idle' })
     ])
   })
 })
@@ -389,7 +389,7 @@ describe('Engine.stopSession', () => {
 describe('Engine.refreshSessionStatuses', () => {
   const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
 
-  it('keeps polling a discovered Session that started out idle, not just ones spawned running', async () => {
+  it('keeps polling a discovered Session that started out idle', async () => {
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
     const processAdapter = createFakeProcessAdapter()
@@ -416,7 +416,7 @@ describe('Engine.refreshSessionStatuses', () => {
     expect(session.status).toBe('done')
   })
 
-  it('leaves a session running while its process is still alive, without notifying', async () => {
+  it('leaves an idle session idle while its process is alive and it has no captured prompt, without notifying', async () => {
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
     const processAdapter = createFakeProcessAdapter()
@@ -428,7 +428,7 @@ describe('Engine.refreshSessionStatuses', () => {
     await engine.spawnSession('project-1')
     const [session] = await engine.refreshSessionStatuses()
 
-    expect(session.status).toBe('running')
+    expect(session.status).toBe('idle')
     expect(notification.notifications).toEqual([])
   })
 
@@ -569,7 +569,7 @@ describe('Engine.refreshSessionStatuses', () => {
     const sessions = await engine.refreshSessionStatuses()
 
     expect(sessions.find((s) => s.id === first.id)?.status).toBe('done')
-    expect(sessions.find((s) => s.id === second.id)?.status).toBe('running')
+    expect(sessions.find((s) => s.id === second.id)?.status).toBe('idle')
   })
 
   it('transitions a session to waiting-on-permission and fires a notification when the process pauses on a permission prompt', async () => {
@@ -721,7 +721,45 @@ describe('Engine.respondToPrompt', () => {
     )
   })
 
-  it('rejects when the session has no pending prompt', async () => {
+  it('rejects a running session with no captured prompt - interjecting mid-task is out of scope', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const spawned = await engine.spawnSession('project-1')
+    // idle -> running: the first message is exactly what respondToPrompt
+    // allows for an idle session; a second one, with nothing captured in
+    // between, is the "interjecting mid-task" case this rejects.
+    await engine.respondToPrompt(spawned.id, 'start the task')
+
+    await expect(engine.respondToPrompt(spawned.id, 'yes')).rejects.toThrow(
+      `Session cannot receive a message right now: ${spawned.id}`
+    )
+  })
+
+  it('rejects a session in a terminal status', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const spawned = await engine.spawnSession('project-1')
+    processAdapter.simulateExit(spawned.pid, 0)
+    await engine.refreshSessionStatuses()
+
+    await expect(engine.respondToPrompt(spawned.id, 'yes')).rejects.toThrow(
+      `Session cannot receive a message right now: ${spawned.id}`
+    )
+  })
+
+  it('sends a message to a freshly spawned (idle) session with no captured prompt, and marks it running', async () => {
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()
     const processAdapter = createFakeProcessAdapter()
@@ -732,9 +770,65 @@ describe('Engine.respondToPrompt', () => {
 
     const spawned = await engine.spawnSession('project-1')
 
-    await expect(engine.respondToPrompt(spawned.id, 'yes')).rejects.toThrow(
-      `Session has no pending prompt: ${spawned.id}`
-    )
+    const updated = await engine.respondToPrompt(spawned.id, 'Add a README')
+
+    expect(processAdapter.responses).toEqual([{ pid: spawned.pid, text: 'Add a README' }])
+    expect(updated.status).toBe('running')
+  })
+})
+
+describe('Engine.getTranscript', () => {
+  const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+
+  it('starts empty for a freshly spawned session', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const spawned = await engine.spawnSession('project-1')
+
+    await expect(engine.getTranscript(spawned.id)).resolves.toEqual([])
+  })
+
+  it('records each sent message as a user turn, in order', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const spawned = await engine.spawnSession('project-1')
+
+    await engine.respondToPrompt(spawned.id, 'first task')
+    processAdapter.simulatePrompt(spawned.pid, { type: 'input', text: 'which branch?' })
+    await engine.refreshSessionStatuses()
+    await engine.respondToPrompt(spawned.id, 'main')
+
+    const transcript = await engine.getTranscript(spawned.id)
+
+    expect(transcript.map((message) => ({ role: message.role, text: message.text }))).toEqual([
+      { role: 'user', text: 'first task' },
+      { role: 'user', text: 'main' }
+    ])
+    expect(transcript[0].id).not.toEqual(transcript[1].id)
+  })
+
+  it('rejects when the session id is unknown', async () => {
+    const persistence = createFakePersistenceAdapter()
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    await expect(engine.getTranscript('missing')).rejects.toThrow('Unknown session: missing')
   })
 })
 
@@ -1597,7 +1691,7 @@ describe('Engine.discoverSessions', () => {
     await engine.discoverSessions()
 
     const sessions = await engine.listSessions()
-    expect(sessions).toEqual([expect.objectContaining({ id: spawned.id, status: 'running' })])
+    expect(sessions).toEqual([expect.objectContaining({ id: spawned.id, status: 'idle' })])
   })
 
   it('rediscovers a Session that was spawned in a previous run and is still alive (ADR-0002)', async () => {

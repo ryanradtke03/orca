@@ -3,6 +3,7 @@ import type { Project, Session } from '../../shared/ipc-contract'
 import {
   canDiscardWorktree,
   canRequestMerge,
+  canSendMessage,
   canViewDiff,
   describeMergeMode,
   describeStatus,
@@ -93,11 +94,11 @@ describe('groupSessionsByProject', () => {
 })
 
 describe('isStoppable', () => {
-  it('allows stopping only running or waiting sessions', () => {
+  it('allows stopping any session whose process is still expected to be alive', () => {
     expect(isStoppable('running')).toBe(true)
+    expect(isStoppable('idle')).toBe(true)
     expect(isStoppable('waiting-on-permission')).toBe(true)
     expect(isStoppable('waiting-on-input')).toBe(true)
-    expect(isStoppable('idle')).toBe(false)
     expect(isStoppable('done')).toBe(false)
     expect(isStoppable('errored')).toBe(false)
     expect(isStoppable('stopped')).toBe(false)
@@ -113,6 +114,27 @@ describe('isAttentionStatus', () => {
     expect(isAttentionStatus('done')).toBe(false)
     expect(isAttentionStatus('errored')).toBe(false)
     expect(isAttentionStatus('stopped')).toBe(false)
+  })
+})
+
+describe('canSendMessage', () => {
+  it('is true for idle and waiting-on-input, where the always-available message input is shown', () => {
+    expect(canSendMessage('idle')).toBe(true)
+    expect(canSendMessage('waiting-on-input')).toBe(true)
+  })
+
+  it('is false while running - interjecting mid-task is out of scope', () => {
+    expect(canSendMessage('running')).toBe(false)
+  })
+
+  it('is false for waiting-on-permission, which uses approve/deny instead', () => {
+    expect(canSendMessage('waiting-on-permission')).toBe(false)
+  })
+
+  it('is false for every terminal status', () => {
+    expect(canSendMessage('done')).toBe(false)
+    expect(canSendMessage('errored')).toBe(false)
+    expect(canSendMessage('stopped')).toBe(false)
   })
 })
 

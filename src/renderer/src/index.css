@@ -1,0 +1,87 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-app: #0d0d0d;
+  --color-sidebar: #0a0a0a;
+  --color-panel: #131313;
+  --color-panel-alt: #111110;
+  --color-hover: rgba(255, 255, 255, 0.05);
+  --color-active: rgba(255, 255, 255, 0.09);
+
+  --color-border-faint: rgba(255, 255, 255, 0.055);
+  --color-border-soft: rgba(255, 255, 255, 0.08);
+  --color-border-medium: rgba(255, 255, 255, 0.18);
+  --color-border-strong: rgba(255, 255, 255, 0.5);
+
+  --color-primary: #f4f4f2;
+  --color-secondary: rgba(255, 255, 255, 0.62);
+  --color-tertiary: rgba(255, 255, 255, 0.42);
+  --color-faint: rgba(255, 255, 255, 0.3);
+
+  --color-accent: #f4f4f2;
+  --color-accent-ink: #0b0b0b;
+  --color-danger: #ff8a80;
+
+  --color-diff-add: #8fe3ab;
+  --color-diff-add-bg: rgba(90, 200, 130, 0.12);
+  --color-diff-del: #ff8a80;
+  --color-diff-del-bg: rgba(255, 110, 110, 0.1);
+
+  --font-ui: 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-app);
+  color: var(--color-primary);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+@layer components {
+  .btn {
+    @apply rounded-[5px] border-0 bg-accent px-[14px] py-[7px] text-[11px] leading-none font-medium text-accent-ink;
+  }
+  .btn:hover {
+    @apply bg-white;
+  }
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+
+  .btn-ghost {
+    @apply rounded-[5px] border border-border-medium bg-transparent px-3 py-[7px] text-[11px] leading-none font-normal text-secondary;
+  }
+  .btn-ghost:hover {
+    @apply border-white/50 text-primary;
+  }
+  .btn-ghost:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+
+  .label-heading {
+    @apply text-[9.5px] leading-none font-medium tracking-[0.11em] text-faint uppercase;
+  }
+
+  .field-input {
+    @apply rounded-[5px] border border-border-medium bg-white/4 px-[10px] py-[7px] text-[11.5px] leading-none font-normal text-primary;
+  }
+  .field-input:focus {
+    @apply border-white/55 outline-none;
+  }
+  .field-input::placeholder {
+    @apply text-faint;
+  }
+}

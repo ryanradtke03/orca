@@ -7,7 +7,9 @@ import type {
   PingResult,
   Project,
   Session,
-  SessionStatus
+  SessionStatus,
+  TranscriptMessage,
+  TranscriptRole
 } from '../../shared/ipc-contract'
 import type { EngineAdapters, PullRequestStatus, WorktreeInfo } from './adapters'
 
@@ -22,6 +24,7 @@ export interface Engine {
   stopSession(sessionId: string): Promise<Session>
   respondToPrompt(sessionId: string, response: string): Promise<Session>
   getDiff(sessionId: string): Promise<FileDiff[]>
+  getTranscript(sessionId: string): Promise<TranscriptMessage[]>
   setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
   requestMerge(sessionId: string): Promise<MergeResult>
   discoverSessions(): Promise<Session[]>
@@ -34,8 +37,7 @@ export interface Engine {
 // pid as "already tracked" only while its Session is in one of these -
 // otherwise the process behind a terminal Session's pid is gone and the OS
 // is free to reuse that pid for something unrelated, so it must not block a
-// genuinely new discovery. 'idle' is included even though a freshly spawned
-// Session is never created idle, because a discovered one can be.
+// genuinely new discovery.
 const ACTIVE_STATUSES: ReadonlySet<Session['status']> = new Set([
   'running',
   'waiting-on-permission',
@@ -43,9 +45,28 @@ const ACTIVE_STATUSES: ReadonlySet<Session['status']> = new Set([
   'idle'
 ])
 
+// Sessions a message can actually be delivered to via the attach-based write
+// path (adapters.process.respond): waiting-on-permission/waiting-on-input
+// answer whatever prompt the CLI already captured, while idle has no
+// captured prompt at all but is otherwise free to receive its first task.
+// 'running' is deliberately excluded - the write path is timing-based, not
+// state-verified, and interjecting while the CLI is already mid-task needs
+// its own safety pass later; terminal statuses have no process left to
+// receive anything.
+const RESPONDABLE_STATUSES: ReadonlySet<Session['status']> = new Set([
+  'idle',
+  'waiting-on-input',
+  'waiting-on-permission'
+])
+
 export function createEngine(adapters: EngineAdapters): Engine {
   let projects: Project[] | undefined
   let sessions: Session[] = []
+  // STUB: replace with real transcript capture (parsing `claude logs <id>`
+  // into structured message history) - a follow-up issue's job. Until then,
+  // this only ever reflects messages sent through Orca itself, keyed by
+  // Session id, never anything the CLI actually said.
+  const transcripts = new Map<string, TranscriptMessage[]>()
   // Serializes addProject calls, and reads that must not observe a write mid-flight,
   // so a concurrent read-modify-write can't drop a write or return a stale project list.
   let writeQueue: Promise<unknown> = Promise.resolve()
@@ -280,6 +301,10 @@ export function createEngine(adapters: EngineAdapters): Engine {
       const alreadyDiscovered = sessions.find((candidate) => candidate.pid === pid)
       if (alreadyDiscovered) return alreadyDiscovered
 
+      // adapters.process.spawnClaude starts the CLI bare, with no initial
+      // task (#44/#45) - it genuinely has nothing to do until Orca's own UI
+      // sends it one via respondToPrompt, so 'idle' (not 'running') is the
+      // only accurate initial status.
       const session: Session = {
         id: randomUUID(),
         projectId,
@@ -287,7 +312,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
         branch,
         baseRef,
         pid,
-        status: 'running'
+        status: 'idle'
       }
       sessions = [...sessions, session]
 
@@ -402,22 +427,35 @@ export function createEngine(adapters: EngineAdapters): Engine {
     })
   }
 
+  function appendTranscriptMessage(sessionId: string, role: TranscriptRole, text: string): void {
+    const existing = transcripts.get(sessionId) ?? []
+    transcripts.set(sessionId, [...existing, { id: randomUUID(), role, text, timestamp: Date.now() }])
+  }
+
   function respondToPrompt(sessionId: string, response: string): Promise<Session> {
     return serializeSessionWrite(async () => {
       const session = sessions.find((candidate) => candidate.id === sessionId)
       if (!session) {
         throw new Error(`Unknown session: ${sessionId}`)
       }
-      if (!session.pendingPrompt) {
-        throw new Error(`Session has no pending prompt: ${sessionId}`)
+      if (!RESPONDABLE_STATUSES.has(session.status)) {
+        throw new Error(`Session cannot receive a message right now: ${sessionId}`)
       }
 
       await adapters.process.respond(session.pid, response)
+      appendTranscriptMessage(sessionId, 'user', response)
 
       const updated: Session = { ...session, status: 'running', pendingPrompt: undefined }
       sessions = sessions.map((candidate) => (candidate.id === sessionId ? updated : candidate))
       return updated
     })
+  }
+
+  async function getTranscript(sessionId: string): Promise<TranscriptMessage[]> {
+    if (!sessions.some((candidate) => candidate.id === sessionId)) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+    return transcripts.get(sessionId) ?? []
   }
 
   function stopSession(sessionId: string): Promise<Session> {
@@ -586,6 +624,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     stopSession,
     respondToPrompt,
     getDiff,
+    getTranscript,
     setProjectMergeMode,
     requestMerge,
     discoverSessions,

@@ -123,8 +123,18 @@ async function seedDemoData(
   processAdapter: FakeProcessAdapter,
   github: FakeGitHubAdapter
 ): Promise<void> {
+  // Freshly spawned, exactly as `claude ... --bg` leaves it: nothing queued
+  // yet. The chat pane's always-available message input (#45) is the thing
+  // to try on this one.
+  const idle = await engine.spawnSession(DEMO_PROJECT_ID)
+  git.simulateDiff(idle.worktreePath, SMALL_DIFF)
+
   const running = await engine.spawnSession(DEMO_PROJECT_ID)
   git.simulateDiff(running.worktreePath, SMALL_DIFF)
+  // Sending a message is what actually moves a session from idle to running
+  // (#45) - there's no other way to get one there now that spawning no
+  // longer takes an initial task (#44).
+  await engine.respondToPrompt(running.id, 'Add a couple of startup log lines')
 
   const waiting = await engine.spawnSession(DEMO_PROJECT_ID)
   git.simulateDiff(waiting.worktreePath, SMALL_DIFF)
@@ -161,10 +171,10 @@ async function seedDemoData(
 
 /**
  * Runs the real app against the same fake adapters engine.test.ts uses,
- * seeded with a project and a few sessions in different states (running,
- * waiting-on-permission, done) each with a canned diff already attached -
- * so the UI can be clicked through end-to-end without a real `claude`
- * process or git repo. Opt in via `ORCA_DEMO=1` (see index.ts).
+ * seeded with a project and a few sessions in different states (idle,
+ * running, waiting-on-permission, done) each with a canned diff already
+ * attached - so the UI can be clicked through end-to-end without a real
+ * `claude` process or git repo. Opt in via `ORCA_DEMO=1` (see index.ts).
  */
 export function createDemoEngine(): Engine {
   const persistence = createFakePersistenceAdapter({
