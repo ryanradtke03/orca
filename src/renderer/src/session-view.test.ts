@@ -94,11 +94,11 @@ describe('groupSessionsByProject', () => {
 })
 
 describe('isStoppable', () => {
-  it('allows stopping only running or waiting sessions', () => {
+  it('allows stopping any session whose process is still expected to be alive', () => {
     expect(isStoppable('running')).toBe(true)
+    expect(isStoppable('idle')).toBe(true)
     expect(isStoppable('waiting-on-permission')).toBe(true)
     expect(isStoppable('waiting-on-input')).toBe(true)
-    expect(isStoppable('idle')).toBe(false)
     expect(isStoppable('done')).toBe(false)
     expect(isStoppable('errored')).toBe(false)
     expect(isStoppable('stopped')).toBe(false)

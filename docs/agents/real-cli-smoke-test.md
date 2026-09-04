@@ -57,7 +57,7 @@ native folder picker.
 ## 4. Spawn a Session
 
 Click **New session** on the project. Wait for it to appear with status
-**Running** (not stuck on an error).
+**Idle** (not stuck on an error) — it has nothing queued yet, see step 5.
 
 - **Confirms**: `process/real.ts`'s `spawnClaude` successfully ran
   `claude ... --bg` in the scratch repo, parsed the `backgrounded · <id>`

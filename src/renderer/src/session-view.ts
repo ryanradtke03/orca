@@ -16,6 +16,7 @@ export function describeStatus(status: SessionStatus): string {
 
 export const STOPPABLE_STATUSES: ReadonlySet<SessionStatus> = new Set([
   'running',
+  'idle',
   'waiting-on-permission',
   'waiting-on-input'
 ])

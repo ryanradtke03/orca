@@ -37,8 +37,7 @@ export interface Engine {
 // pid as "already tracked" only while its Session is in one of these -
 // otherwise the process behind a terminal Session's pid is gone and the OS
 // is free to reuse that pid for something unrelated, so it must not block a
-// genuinely new discovery. 'idle' is included even though a freshly spawned
-// Session is never created idle, because a discovered one can be.
+// genuinely new discovery.
 const ACTIVE_STATUSES: ReadonlySet<Session['status']> = new Set([
   'running',
   'waiting-on-permission',
@@ -302,6 +301,10 @@ export function createEngine(adapters: EngineAdapters): Engine {
       const alreadyDiscovered = sessions.find((candidate) => candidate.pid === pid)
       if (alreadyDiscovered) return alreadyDiscovered
 
+      // adapters.process.spawnClaude starts the CLI bare, with no initial
+      // task (#44/#45) - it genuinely has nothing to do until Orca's own UI
+      // sends it one via respondToPrompt, so 'idle' (not 'running') is the
+      // only accurate initial status.
       const session: Session = {
         id: randomUUID(),
         projectId,
@@ -309,7 +312,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
         branch,
         baseRef,
         pid,
-        status: 'running'
+        status: 'idle'
       }
       sessions = [...sessions, session]
 
