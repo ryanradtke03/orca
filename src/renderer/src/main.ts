@@ -1,4 +1,4 @@
-import type { FileDiff, MergeMode, Project, Session } from '../../shared/ipc-contract'
+import type { FileDiff, MergeMode, Project, Session, TranscriptMessage } from '../../shared/ipc-contract'
 import { renderDiffLoadError, renderDiffLoading, renderDiffScreen } from './diff-view'
 import { el } from './dom'
 import { renderPromptText, renderStatusMarker } from './prompt-view'
@@ -143,24 +143,16 @@ function renderNeedsYouSection(attention: Session[]): HTMLElement {
   return section
 }
 
-// A freshly spawned Session otherwise comes up with nothing queued and no
-// way from Orca's own UI to give it one (#40) - this optional field lets the
-// user hand it a first task at spawn time instead.
+// A freshly spawned Session comes up with nothing queued - giving it its
+// first task is done from the session page's always-available message input
+// once it's idle (#45), not at spawn time.
 function renderNewSessionForm(projectId: string): HTMLFormElement {
   const form = el('form', { className: 'new-session-form' })
   form.dataset.projectId = projectId
 
-  const taskInput = el('input', {
-    type: 'text',
-    className: 'new-session-task-input',
-    placeholder: 'Initial task (optional)…',
-    autocomplete: 'off'
-  })
-  taskInput.dataset.projectId = projectId
-
   const spawnButton = el('button', { type: 'submit', className: 'btn new-session-button', textContent: 'New session' })
 
-  form.append(taskInput, spawnButton)
+  form.append(spawnButton)
   return form
 }
 
@@ -365,28 +357,18 @@ interface FieldDraft {
   selectionStart: number | null
 }
 
-// Every input a full re-render would otherwise wipe mid-type, identified by
-// the data attribute that makes it unique across a rebuild.
-const DRAFT_FIELDS = [
-  { className: 'reply-input', attr: 'sessionId' },
-  { className: 'new-session-task-input', attr: 'projectId' }
-] as const
-
 function captureFieldDraft(): FieldDraft | null {
   const active = document.activeElement
-  if (!(active instanceof HTMLInputElement)) return null
+  if (!(active instanceof HTMLInputElement) || !active.classList.contains('reply-input')) return null
 
-  for (const { className, attr } of DRAFT_FIELDS) {
-    if (!active.classList.contains(className)) continue
-    const id = active.dataset[attr]
-    if (!id) continue
-    return {
-      selector: `.${className}[data-${attr === 'sessionId' ? 'session-id' : 'project-id'}="${id}"]`,
-      value: active.value,
-      selectionStart: active.selectionStart
-    }
+  const sessionId = active.dataset.sessionId
+  if (!sessionId) return null
+
+  return {
+    selector: `.reply-input[data-session-id="${sessionId}"]`,
+    value: active.value,
+    selectionStart: active.selectionStart
   }
-  return null
 }
 
 function restoreFieldDraft(draft: FieldDraft | null): void {
@@ -522,12 +504,42 @@ async function renderDiffView(sessionId: string): Promise<void> {
 // this and forces a re-fetch.
 let sessionViewFilesCache: { sessionId: string; files: FileDiff[] } | null = null
 
+// Unlike the diff cache above, the transcript is meant to live-update on the
+// same 2s cadence as session status (#45) - this holds only the most
+// recently fetched copy, refreshed every poll tick via refreshSessionTranscript.
+let sessionViewTranscriptCache: { sessionId: string; transcript: TranscriptMessage[] } | null = null
+
 // Guards against the 2s poll re-entering renderSessionPageView for the same
 // session while its `getDiff` fetch is still in flight - without this, a
 // fetch slower than the poll interval would have each tick start a new one
 // that invalidates the last via `viewRequestToken`, so the cache never gets
 // populated and the page never leaves "Loading session…".
 let sessionViewFetchSessionId: string | null = null
+
+// Guards against overlapping transcript fetches the same way, if one ever
+// outlasts the 2s poll interval - a stale response finishing after the next
+// tick already fetched fresher data would otherwise stomp it.
+let transcriptFetchInFlight = false
+
+async function refreshSessionTranscript(sessionId: string): Promise<void> {
+  if (transcriptFetchInFlight) return
+  transcriptFetchInFlight = true
+  try {
+    const transcript = await window.orca.getTranscript(sessionId)
+    // The user may have navigated to a different session (or away entirely)
+    // while this was in flight - don't let a stale response overwrite the
+    // cache for whatever's actually being viewed now.
+    if (currentView.type === 'session' && currentView.sessionId === sessionId) {
+      sessionViewTranscriptCache = { sessionId, transcript }
+    }
+  } catch (error) {
+    if (currentView.type === 'session' && currentView.sessionId === sessionId) {
+      setStatus(`Failed to load transcript: ${describeError(error)}`)
+    }
+  } finally {
+    transcriptFetchInFlight = false
+  }
+}
 
 async function renderSessionPageView(sessionId: string): Promise<void> {
   if (!app) return
@@ -545,9 +557,11 @@ async function renderSessionPageView(sessionId: string): Promise<void> {
     // same as renderDashboard - otherwise typing a reply on this page would
     // be silently wiped out from under the user every 2s.
     const draft = captureFieldDraft()
+    const transcript = sessionViewTranscriptCache?.sessionId === sessionId ? sessionViewTranscriptCache.transcript : []
     app.innerHTML = ''
-    app.append(renderSessionScreen(session, sessionViewFilesCache.files))
+    app.append(renderSessionScreen(session, sessionViewFilesCache.files, transcript))
     restoreFieldDraft(draft)
+    void refreshSessionTranscript(sessionId)
     return
   }
 
@@ -564,12 +578,16 @@ async function renderSessionPageView(sessionId: string): Promise<void> {
   app.append(renderSessionLoading())
 
   try {
-    const files = await window.orca.getDiff(sessionId)
+    const [files, transcript] = await Promise.all([
+      window.orca.getDiff(sessionId),
+      window.orca.getTranscript(sessionId)
+    ])
     if (token !== viewRequestToken) return
     sessionViewFilesCache = { sessionId, files }
+    sessionViewTranscriptCache = { sessionId, transcript }
     const draft = captureFieldDraft()
     app.innerHTML = ''
-    app.append(renderSessionScreen(session, files))
+    app.append(renderSessionScreen(session, files, transcript))
     restoreFieldDraft(draft)
   } catch (error) {
     if (token !== viewRequestToken) return
@@ -631,9 +649,9 @@ async function handleAddProject(): Promise<void> {
   }
 }
 
-async function handleNewSession(projectId: string, initialPrompt?: string): Promise<void> {
+async function handleNewSession(projectId: string): Promise<void> {
   try {
-    await window.orca.spawnSession(projectId, initialPrompt)
+    await window.orca.spawnSession(projectId)
     await refreshAll()
   } catch (error) {
     setStatus(`Failed to spawn session: ${describeError(error)}`)
@@ -713,11 +731,13 @@ function scrollToId(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-// A fresh navigation to a session always drops the cached diff, so the
-// session page's "files touched" panel reflects the session's current state
-// rather than whatever was last fetched for it.
+// A fresh navigation to a session always drops the cached diff and
+// transcript, so the session page reflects the session's current state
+// rather than whatever was last fetched for it (or another session's, if
+// this is a fresh navigation there instead).
 function openSessionPage(sessionId: string): void {
   sessionViewFilesCache = null
+  sessionViewTranscriptCache = null
   currentView = { type: 'session', sessionId }
   renderApp()
 }
@@ -827,7 +847,7 @@ function handleAppSubmit(event: Event): void {
     // `required` blocks a fully empty submit; this catches the whitespace-only case
     // it can't, so the user still sees why nothing was sent instead of silence.
     if (!reply) {
-      setStatus('Reply cannot be blank.')
+      setStatus('Message cannot be blank.')
       return
     }
 
@@ -839,11 +859,9 @@ function handleAppSubmit(event: Event): void {
     event.preventDefault()
 
     const projectId = form.dataset.projectId
-    const input = form.querySelector<HTMLInputElement>('.new-session-task-input')
-    const initialPrompt = input?.value.trim()
     if (!projectId) return
 
-    void handleNewSession(projectId, initialPrompt || undefined)
+    void handleNewSession(projectId)
     return
   }
 

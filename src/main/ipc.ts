@@ -45,6 +45,8 @@ export function registerIpcHandlers(engine: Engine): void {
 
   ipcMain.handle(IPC_CHANNELS.getDiff, (_event, sessionId: string) => engine.getDiff(sessionId))
 
+  ipcMain.handle(IPC_CHANNELS.getTranscript, (_event, sessionId: string) => engine.getTranscript(sessionId))
+
   ipcMain.handle(
     IPC_CHANNELS.setProjectMergeMode,
     (_event, projectId: string, mergeMode: MergeMode) =>

@@ -12,6 +12,7 @@ const orca: OrcaApi = {
   respondToPrompt: (sessionId, response) =>
     ipcRenderer.invoke(IPC_CHANNELS.respondToPrompt, sessionId, response),
   getDiff: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getDiff, sessionId),
+  getTranscript: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.getTranscript, sessionId),
   setProjectMergeMode: (projectId, mergeMode) =>
     ipcRenderer.invoke(IPC_CHANNELS.setProjectMergeMode, projectId, mergeMode),
   requestMerge: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.requestMerge, sessionId),

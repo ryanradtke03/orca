@@ -9,7 +9,7 @@ Manual procedure for exercising Orca's **real** adapters against an installed
 | Spawn a session | `process/real.ts` (`spawnClaude`, via `claude ... --bg`) | `src/main/engine/adapters/process/real.ts` |
 | Worktree/branch creation | `git/real.ts` (`createWorktree`) | `src/main/engine/adapters/git/real.ts` |
 | Detect + parse a pending prompt | `claude-cli/agent-status.ts` (`claude agents --json --all`) and `claude-cli/prompt-text.ts` (`claude logs`, rendered via `@xterm/headless`) | `src/main/engine/claude-cli/agent-status.ts`, `src/main/engine/claude-cli/prompt-text.ts` |
-| Approve/deny a prompt | `process/real.ts` (`respond`, via `claude attach`) | `src/main/engine/adapters/process/real.ts` |
+| Send a message (initial task, reply, or approve/deny) | `process/real.ts` (`respond`, via `claude attach`) | `src/main/engine/adapters/process/real.ts` |
 | View the Diff | `git/real.ts` (`getDiff`) → `diff-parser.ts` against real `git diff` output | `src/main/engine/adapters/git/real.ts`, `src/main/engine/adapters/git/diff-parser.ts` |
 | Merge (Local merge mode) | `git/real.ts` (`mergeWorktree`) | `src/main/engine/adapters/git/real.ts` |
 
@@ -71,23 +71,19 @@ Click **New session** on the project. Wait for it to appear with status
 
 ## 5. Drive it to a real permission prompt and approve
 
-Orca has no chat/task box of its own (see #40) — `spawnSession` starts the
-CLI bare, with no initial prompt, so the session comes up **Idle**. To give
-it something to do, attach to it directly with the CLI, outside Orca:
+`spawnSession` starts the CLI bare, with no initial prompt, so the session
+comes up **Idle** with a session page whose chat pane has an always-available
+message input (#45). Open the session and send it a task that needs tool
+permission in the scratch repo — e.g. "Create a file called `hello.txt` with
+the text `hello world`" — and wait for the prompt to appear.
 
-```bash
-claude agents --json --all   # find this session's id (the "id" field, cwd
-                              # matches the worktree path from step 4)
-claude attach <id>
-```
+- **Confirms**: `process/real.ts`'s `respond` (via `claude attach <id>` over
+  node-pty) delivers a message to a session with no captured prompt yet, now
+  that `engine.ts`'s `respondToPrompt` no longer requires one for an
+  idle/waiting-on-input session.
 
-Once attached, type a task that needs tool permission in the scratch repo —
-e.g. "Create a file called `hello.txt` with the text `hello world`" — press
-Enter, and wait for the prompt to appear in the terminal. Press **Ctrl+Z** to
-detach back to your shell (this does *not* kill the session — `/exit` doesn't
-either; it just ends the attached view, same as Ctrl+Z). Switch to Orca and
-confirm the session's status changed to **Waiting · permission** with a
-prompt rendered in the "needs you" area and **Approve**/**Deny** buttons.
+Confirm the session's status changed to **Waiting · permission** with a
+prompt rendered in the chat pane and **Approve**/**Deny** buttons.
 
 - **Confirms**: `agent-status.ts`'s `promptTypeFromStatus` correctly read
   `waitingFor: 'permission prompt'` from `claude agents --json --all` and

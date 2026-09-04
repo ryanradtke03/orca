@@ -52,6 +52,15 @@ export interface Session {
   pullRequestUrl?: string
 }
 
+export type TranscriptRole = 'user' | 'assistant'
+
+export interface TranscriptMessage {
+  id: string
+  role: TranscriptRole
+  text: string
+  timestamp: number
+}
+
 export type FileDiffStatus = 'added' | 'modified' | 'deleted' | 'renamed'
 
 export interface FileDiff {
@@ -72,6 +81,7 @@ export const IPC_CHANNELS = {
   stopSession: 'session:stop',
   respondToPrompt: 'session:respond-to-prompt',
   getDiff: 'session:get-diff',
+  getTranscript: 'session:get-transcript',
   setProjectMergeMode: 'project:set-merge-mode',
   requestMerge: 'session:request-merge',
   discardWorktree: 'session:discard-worktree',
@@ -88,6 +98,7 @@ export interface OrcaApi {
   stopSession(sessionId: string): Promise<Session>
   respondToPrompt(sessionId: string, response: string): Promise<Session>
   getDiff(sessionId: string): Promise<FileDiff[]>
+  getTranscript(sessionId: string): Promise<TranscriptMessage[]>
   setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
   requestMerge(sessionId: string): Promise<MergeResult>
   discardWorktree(sessionId: string): Promise<Session>

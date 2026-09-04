@@ -30,13 +30,13 @@ export function renderReplyForm(sessionId: string): HTMLFormElement {
   const input = el('input', {
     type: 'text',
     className: 'reply-input',
-    placeholder: 'Type a reply…',
+    placeholder: 'Type a message…',
     autocomplete: 'off',
     required: true
   })
   input.dataset.sessionId = sessionId
 
-  const sendButton = el('button', { type: 'submit', className: 'btn', textContent: 'Reply' })
+  const sendButton = el('button', { type: 'submit', className: 'btn', textContent: 'Send' })
 
   form.append(input, sendButton)
   return form

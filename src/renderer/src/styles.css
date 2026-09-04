@@ -517,25 +517,6 @@ button {
   flex: none;
 }
 
-.new-session-task-input {
-  width: 180px;
-  padding: 5px 9px;
-  border-radius: 5px;
-  border: 1px solid var(--border-medium);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-primary);
-  font: 400 10.5px/1 var(--font-ui);
-}
-
-.new-session-task-input:focus {
-  outline: none;
-  border-color: rgba(255, 255, 255, 0.55);
-}
-
-.new-session-task-input::placeholder {
-  color: var(--text-faint);
-}
-
 .merge-mode-select {
   flex: none;
   padding: 4px 8px;
@@ -978,12 +959,17 @@ button {
 #session-chat {
   flex: 1;
   padding: 24px;
+  overflow-y: auto;
 }
 
-#session-chat-empty {
+.session-chat-hint {
   padding: 40px 0;
   font: 400 12.5px/1.5 var(--font-ui);
   color: var(--text-faint);
+}
+
+#session-chat-transcript {
+  margin-bottom: 16px;
 }
 
 .session-chat-turn {
@@ -992,6 +978,26 @@ button {
 
 .session-chat-turn .prompt-text {
   max-height: none;
+}
+
+.session-chat-turn-text {
+  margin: 0;
+  padding: 10px 13px;
+  border-radius: 6px;
+  font: 400 11.5px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.session-chat-turn-user .session-chat-turn-text {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.session-chat-turn-assistant .session-chat-turn-text {
+  background: transparent;
+  border: 1px solid var(--border-faint);
+  color: var(--text-secondary);
 }
 
 #session-inspector {
