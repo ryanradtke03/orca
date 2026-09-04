@@ -1,7 +1,8 @@
-import { resolvePermissionResponses } from '../../shared/prompt-options'
-import type { MergeMode, PendingPrompt, Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import type { FileDiff, MergeMode, Project, Session } from '../../shared/ipc-contract'
 import { renderDiffLoadError, renderDiffLoading, renderDiffScreen } from './diff-view'
 import { el } from './dom'
+import { renderPromptText, renderStatusMarker } from './prompt-view'
+import { renderSessionLoadError, renderSessionLoading, renderSessionScreen } from './session-page'
 import {
   canDiscardWorktree,
   canRequestMerge,
@@ -27,7 +28,7 @@ const app = document.querySelector<HTMLDivElement>('#app')
 let latestProjects: Project[] = []
 let latestSessions: Session[] = []
 
-type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string }
+type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type: 'session'; sessionId: string }
 let currentView: View = { type: 'dashboard' }
 
 // Whether the Adopt form (sidebar footer) is expanded - reset once an adopt
@@ -37,23 +38,6 @@ let adoptFormOpen = false
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function renderStatusMarker(status: SessionStatus): HTMLElement {
-  if (status === 'waiting-on-permission') {
-    return el('span', { className: 'marker-diamond' })
-  }
-  if (status === 'waiting-on-input') {
-    return el('span', { className: 'marker-ring' })
-  }
-  if (status === 'done') {
-    return el('span', { textContent: '✓' })
-  }
-  if (status === 'errored') {
-    return el('span', { className: 'errored-mark', textContent: '✕' })
-  }
-  const dotClass = status === 'running' ? 'dot-running' : status === 'idle' ? 'dot-idle' : 'dot-terminal'
-  return el('span', { className: `dot ${dotClass}` })
 }
 
 function renderSessionRow(session: Session): HTMLElement {
@@ -67,6 +51,13 @@ function renderSessionRow(session: Session): HTMLElement {
     textContent: describeStatus(session.status)
   })
   const action = el('div', { className: 'row-action' })
+  const openButton = el('button', {
+    type: 'button',
+    className: 'open-session-button',
+    textContent: 'Open'
+  })
+  openButton.dataset.sessionId = session.id
+  action.append(openButton)
   if (canViewDiff(session)) {
     const diffButton = el('button', {
       type: 'button',
@@ -111,67 +102,24 @@ function renderSessionRow(session: Session): HTMLElement {
   return row
 }
 
-function renderPromptText(text: string): HTMLPreElement {
-  return el('pre', { className: 'prompt-text', textContent: text })
-}
-
-function renderReplyForm(sessionId: string): HTMLFormElement {
-  const form = el('form', { className: 'reply-form' })
-  form.dataset.sessionId = sessionId
-
-  const input = el('input', {
-    type: 'text',
-    className: 'reply-input',
-    placeholder: 'Type a reply…',
-    autocomplete: 'off',
-    required: true
-  })
-  input.dataset.sessionId = sessionId
-
-  const sendButton = el('button', { type: 'submit', className: 'btn', textContent: 'Reply' })
-
-  form.append(input, sendButton)
-  return form
-}
-
-function renderPromptActions(prompt: PendingPrompt, sessionId: string): HTMLElement {
-  const { approve, deny } = resolvePermissionResponses(prompt.text)
-
-  const denyButton = el('button', {
-    type: 'button',
-    className: 'btn-ghost',
-    textContent: 'Deny'
-  })
-  denyButton.dataset.sessionId = sessionId
-  denyButton.dataset.response = deny
-  denyButton.classList.add('deny-prompt-button')
-
-  const approveButton = el('button', {
-    type: 'button',
-    className: 'btn',
-    textContent: 'Approve'
-  })
-  approveButton.dataset.sessionId = sessionId
-  approveButton.dataset.response = approve
-  approveButton.classList.add('approve-prompt-button')
-
-  return el('div', { className: 'actions' }, [denyButton, approveButton])
-}
-
+// Navigational only - interacting with the prompt itself now happens on the
+// session page (#43), so this row carries a sessionId for handleAppClick to
+// open rather than any inline reply/approve-deny UI.
 function renderNeedsYouRow(session: Session): HTMLElement {
   const prompt = session.pendingPrompt
   if (!prompt) throw new Error(`renderNeedsYouRow called for session without a pending prompt: ${session.id}`)
 
   const row = el('div', { className: 'needs-you-row' })
+  row.dataset.sessionId = session.id
 
   const marker = el('div', { className: 'marker' }, [renderStatusMarker(session.status)])
   const body = el('div', { className: 'body' }, [
     el('div', { className: 'session-name', textContent: session.branch }),
     renderPromptText(prompt.text)
   ])
+  const openHint = el('span', { className: 'needs-you-open-hint', textContent: 'Open →' })
 
-  row.append(marker, body)
-  row.append(prompt.type === 'permission' ? renderPromptActions(prompt, session.id) : renderReplyForm(session.id))
+  row.append(marker, body, openHint)
 
   return row
 }
@@ -193,6 +141,27 @@ function renderNeedsYouSection(attention: Session[]): HTMLElement {
     )
   )
   return section
+}
+
+// A freshly spawned Session otherwise comes up with nothing queued and no
+// way from Orca's own UI to give it one (#40) - this optional field lets the
+// user hand it a first task at spawn time instead.
+function renderNewSessionForm(projectId: string): HTMLFormElement {
+  const form = el('form', { className: 'new-session-form' })
+  form.dataset.projectId = projectId
+
+  const taskInput = el('input', {
+    type: 'text',
+    className: 'new-session-task-input',
+    placeholder: 'Initial task (optional)…',
+    autocomplete: 'off'
+  })
+  taskInput.dataset.projectId = projectId
+
+  const spawnButton = el('button', { type: 'submit', className: 'btn new-session-button', textContent: 'New session' })
+
+  form.append(taskInput, spawnButton)
+  return form
 }
 
 function renderProjectGroup(group: ProjectSessionGroup): DocumentFragment {
@@ -217,9 +186,7 @@ function renderProjectGroup(group: ProjectSessionGroup): DocumentFragment {
   mergeModeSelect.dataset.projectId = group.project.id
   header.append(mergeModeSelect)
 
-  const newSessionButton = el('button', { type: 'button', className: 'btn new-session-button', textContent: 'New session' })
-  newSessionButton.dataset.projectId = group.project.id
-  header.append(newSessionButton)
+  header.append(renderNewSessionForm(group.project.id))
 
   const table = el('div', { className: 'session-table' })
   if (group.sessions.length === 0) {
@@ -398,15 +365,28 @@ interface FieldDraft {
   selectionStart: number | null
 }
 
+// Every input a full re-render would otherwise wipe mid-type, identified by
+// the data attribute that makes it unique across a rebuild.
+const DRAFT_FIELDS = [
+  { className: 'reply-input', attr: 'sessionId' },
+  { className: 'new-session-task-input', attr: 'projectId' }
+] as const
+
 function captureFieldDraft(): FieldDraft | null {
   const active = document.activeElement
-  if (!(active instanceof HTMLInputElement) || !active.classList.contains('reply-input')) return null
-  if (!active.dataset.sessionId) return null
-  return {
-    selector: `.reply-input[data-session-id="${active.dataset.sessionId}"]`,
-    value: active.value,
-    selectionStart: active.selectionStart
+  if (!(active instanceof HTMLInputElement)) return null
+
+  for (const { className, attr } of DRAFT_FIELDS) {
+    if (!active.classList.contains(className)) continue
+    const id = active.dataset[attr]
+    if (!id) continue
+    return {
+      selector: `.${className}[data-${attr === 'sessionId' ? 'session-id' : 'project-id'}="${id}"]`,
+      value: active.value,
+      selectionStart: active.selectionStart
+    }
   }
+  return null
 }
 
 function restoreFieldDraft(draft: FieldDraft | null): void {
@@ -503,20 +483,21 @@ function renderDashboard(projects: Project[], sessions: Session[]): void {
 
 // Diff data isn't part of the 2s status poll (shelling out to `git diff` on
 // every tick for every session would be wasteful) - it's fetched once when
-// the view is opened. `requestToken` guards against a slow fetch resolving
-// after the user has already navigated elsewhere and clobbering that view.
-let diffRequestToken = 0
+// a view that needs it (Diff, Session) is opened. `requestToken` guards
+// against a slow fetch resolving after the user has already navigated
+// elsewhere and clobbering whatever view they're now on.
+let viewRequestToken = 0
 
 async function renderDiffView(sessionId: string): Promise<void> {
   if (!app) return
-  const token = ++diffRequestToken
+  const token = ++viewRequestToken
 
   app.innerHTML = ''
   app.append(renderDiffLoading())
 
   const session = latestSessions.find((candidate) => candidate.id === sessionId)
   if (!session) {
-    if (token !== diffRequestToken) return
+    if (token !== viewRequestToken) return
     app.innerHTML = ''
     app.append(renderDiffLoadError(`Unknown session: ${sessionId}`))
     return
@@ -524,13 +505,78 @@ async function renderDiffView(sessionId: string): Promise<void> {
 
   try {
     const files = await window.orca.getDiff(sessionId)
-    if (token !== diffRequestToken) return
+    if (token !== viewRequestToken) return
     app.innerHTML = ''
     app.append(renderDiffScreen(session, files))
   } catch (error) {
-    if (token !== diffRequestToken) return
+    if (token !== viewRequestToken) return
     app.innerHTML = ''
     app.append(renderDiffLoadError(describeError(error)))
+  }
+}
+
+// The session page's "files touched" panel reuses `getDiff`, cached here so
+// the 2s status poll (which does re-render this view, to keep the pending
+// prompt and lifecycle actions live) doesn't re-shell to `git diff` on every
+// tick - only a fresh navigation to a session (handleAppClick, below) clears
+// this and forces a re-fetch.
+let sessionViewFilesCache: { sessionId: string; files: FileDiff[] } | null = null
+
+// Guards against the 2s poll re-entering renderSessionPageView for the same
+// session while its `getDiff` fetch is still in flight - without this, a
+// fetch slower than the poll interval would have each tick start a new one
+// that invalidates the last via `viewRequestToken`, so the cache never gets
+// populated and the page never leaves "Loading session…".
+let sessionViewFetchSessionId: string | null = null
+
+async function renderSessionPageView(sessionId: string): Promise<void> {
+  if (!app) return
+
+  const session = latestSessions.find((candidate) => candidate.id === sessionId)
+  if (!session) {
+    viewRequestToken++
+    app.innerHTML = ''
+    app.append(renderSessionLoadError(`Unknown session: ${sessionId}`))
+    return
+  }
+
+  if (sessionViewFilesCache?.sessionId === sessionId) {
+    // Preserves an in-progress reply draft across the poll-driven re-render,
+    // same as renderDashboard - otherwise typing a reply on this page would
+    // be silently wiped out from under the user every 2s.
+    const draft = captureFieldDraft()
+    app.innerHTML = ''
+    app.append(renderSessionScreen(session, sessionViewFilesCache.files))
+    restoreFieldDraft(draft)
+    return
+  }
+
+  if (sessionViewFetchSessionId === sessionId) {
+    app.innerHTML = ''
+    app.append(renderSessionLoading())
+    return
+  }
+
+  const token = ++viewRequestToken
+  sessionViewFetchSessionId = sessionId
+
+  app.innerHTML = ''
+  app.append(renderSessionLoading())
+
+  try {
+    const files = await window.orca.getDiff(sessionId)
+    if (token !== viewRequestToken) return
+    sessionViewFilesCache = { sessionId, files }
+    const draft = captureFieldDraft()
+    app.innerHTML = ''
+    app.append(renderSessionScreen(session, files))
+    restoreFieldDraft(draft)
+  } catch (error) {
+    if (token !== viewRequestToken) return
+    app.innerHTML = ''
+    app.append(renderSessionLoadError(describeError(error)))
+  } finally {
+    if (sessionViewFetchSessionId === sessionId) sessionViewFetchSessionId = null
   }
 }
 
@@ -539,9 +585,13 @@ function renderApp(): void {
     void renderDiffView(currentView.sessionId)
     return
   }
-  // Invalidates any diff fetch still in flight, so it can't resolve after
-  // the user has navigated back and clobber the dashboard they're now on.
-  diffRequestToken++
+  if (currentView.type === 'session') {
+    void renderSessionPageView(currentView.sessionId)
+    return
+  }
+  // Invalidates any diff/session fetch still in flight, so it can't resolve
+  // after the user has navigated back and clobber the dashboard they're now on.
+  viewRequestToken++
   renderDashboard(latestProjects, latestSessions)
 }
 
@@ -561,10 +611,11 @@ async function pollSessionStatuses(): Promise<void> {
   try {
     const sessions = await window.orca.listSessions()
     latestSessions = sessions
-    // Only the dashboard reflects live status polling - re-rendering the
-    // diff view every 2s would reset its scroll position and re-fetch a
-    // `git diff` no one asked for.
-    if (currentView.type === 'dashboard') renderApp()
+    // The dashboard and the session page both reflect live status polling -
+    // the session page needs it to keep the pending prompt and lifecycle
+    // actions current. The diff view is excluded: re-rendering it every 2s
+    // would reset its scroll position and re-fetch a `git diff` no one asked for.
+    if (currentView.type === 'dashboard' || currentView.type === 'session') renderApp()
   } catch (error) {
     setStatus(`Failed to refresh session statuses: ${describeError(error)}`)
   }
@@ -580,9 +631,9 @@ async function handleAddProject(): Promise<void> {
   }
 }
 
-async function handleNewSession(projectId: string): Promise<void> {
+async function handleNewSession(projectId: string, initialPrompt?: string): Promise<void> {
   try {
-    await window.orca.spawnSession(projectId)
+    await window.orca.spawnSession(projectId, initialPrompt)
     await refreshAll()
   } catch (error) {
     setStatus(`Failed to spawn session: ${describeError(error)}`)
@@ -662,6 +713,15 @@ function scrollToId(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+// A fresh navigation to a session always drops the cached diff, so the
+// session page's "files touched" panel reflects the session's current state
+// rather than whatever was last fetched for it.
+function openSessionPage(sessionId: string): void {
+  sessionViewFilesCache = null
+  currentView = { type: 'session', sessionId }
+  renderApp()
+}
+
 function handleAppClick(event: Event): void {
   const target = event.target
   if (!(target instanceof HTMLElement)) return
@@ -673,7 +733,19 @@ function handleAppClick(event: Event): void {
     return
   }
 
-  if (target.closest('#diff-back-button')) {
+  const openSessionButton = target.closest<HTMLButtonElement>('.open-session-button')
+  if (openSessionButton?.dataset.sessionId) {
+    openSessionPage(openSessionButton.dataset.sessionId)
+    return
+  }
+
+  const needsYouRow = target.closest<HTMLElement>('.needs-you-row')
+  if (needsYouRow?.dataset.sessionId) {
+    openSessionPage(needsYouRow.dataset.sessionId)
+    return
+  }
+
+  if (target.closest('#diff-back-button') || target.closest('#session-back-button')) {
     currentView = { type: 'dashboard' }
     renderApp()
     return
@@ -704,12 +776,6 @@ function handleAppClick(event: Event): void {
   const projectNavRow = target.closest<HTMLButtonElement>('.project-nav-row')
   if (projectNavRow?.dataset.projectId) {
     scrollToId(`project-group-${projectNavRow.dataset.projectId}`)
-    return
-  }
-
-  const newSessionButton = target.closest<HTMLButtonElement>('.new-session-button')
-  if (newSessionButton?.dataset.projectId) {
-    void handleNewSession(newSessionButton.dataset.projectId)
     return
   }
 
@@ -766,6 +832,18 @@ function handleAppSubmit(event: Event): void {
     }
 
     void handleRespondToPrompt(sessionId, reply)
+    return
+  }
+
+  if (form.classList.contains('new-session-form')) {
+    event.preventDefault()
+
+    const projectId = form.dataset.projectId
+    const input = form.querySelector<HTMLInputElement>('.new-session-task-input')
+    const initialPrompt = input?.value.trim()
+    if (!projectId) return
+
+    void handleNewSession(projectId, initialPrompt || undefined)
     return
   }
 

@@ -30,6 +30,18 @@ function fileDiffAnchorId(path: string): string {
   return `diff-file-${path}`
 }
 
+export function renderFileStats(file: FileDiff): (HTMLElement | string)[] {
+  return [
+    el('span', { className: 'diff-stat-add', textContent: `+${file.additions}` }),
+    ' ',
+    el('span', { className: 'diff-stat-del', textContent: `−${file.deletions}` })
+  ]
+}
+
+export function renderFileStatusBadge(file: FileDiff): HTMLElement {
+  return el('span', { className: `diff-file-status status-${file.status}`, textContent: file.status })
+}
+
 function renderDiffLine(line: string): HTMLElement {
   const kind = classifyDiffLine(line)
   return el('div', {
@@ -44,12 +56,8 @@ function renderDiffFile(file: FileDiff): HTMLElement {
   return el('div', { className: 'diff-file', id: fileDiffAnchorId(file.path) }, [
     el('div', { className: 'diff-file-header' }, [
       el('span', { className: 'diff-file-path', textContent: file.path }),
-      el('span', { className: 'diff-file-stats' }, [
-        el('span', { className: 'diff-stat-add', textContent: `+${file.additions}` }),
-        ' ',
-        el('span', { className: 'diff-stat-del', textContent: `−${file.deletions}` })
-      ]),
-      el('span', { className: `diff-file-status status-${file.status}`, textContent: file.status })
+      el('span', { className: 'diff-file-stats' }, renderFileStats(file)),
+      renderFileStatusBadge(file)
     ]),
     el(
       'div',
@@ -64,11 +72,7 @@ function renderDiffFileNav(files: FileDiff[]): HTMLElement {
   for (const file of files) {
     const row = el('button', { type: 'button', className: 'diff-file-nav-row' }, [
       el('span', { className: 'path', textContent: file.path }),
-      el('span', { className: 'stats' }, [
-        el('span', { className: 'diff-stat-add', textContent: `+${file.additions}` }),
-        ' ',
-        el('span', { className: 'diff-stat-del', textContent: `−${file.deletions}` })
-      ])
+      el('span', { className: 'stats' }, renderFileStats(file))
     ])
     row.dataset.diffAnchorId = fileDiffAnchorId(file.path)
     nav.append(row)
