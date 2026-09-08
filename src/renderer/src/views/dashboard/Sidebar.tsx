@@ -1,5 +1,5 @@
 import type { Project, Session } from '../../../../shared/ipc-contract'
-import type { ProjectSessionGroup } from '../../session-view'
+import type { ProjectSessionGroup } from '../../view-models/session'
 
 function scrollToId(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })

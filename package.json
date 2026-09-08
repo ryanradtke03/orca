@@ -8,6 +8,7 @@
     "dev": "electron-vite dev",
     "dev:demo": "ORCA_DEMO=1 electron-vite dev",
     "dev:mock": "VITE_ORCA_MOCK=1 electron-vite dev",
+    "dev:debug": "VITE_ORCA_DEBUG=1 electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",

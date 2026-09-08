@@ -8,7 +8,7 @@ import {
   parseHunks,
   type ReviewFileDiff,
   summarizeReview
-} from './diff-view'
+} from './diff'
 
 function makeFile(path: string, overrides: Partial<ReviewFileDiff> = {}): ReviewFileDiff {
   return { path, status: 'modified', additions: 1, deletions: 0, diffText: '', ...overrides }

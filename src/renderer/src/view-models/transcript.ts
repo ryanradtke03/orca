@@ -1,4 +1,4 @@
-import type { TranscriptMessage } from '../../shared/ipc-contract'
+import type { TranscriptMessage } from '../../../shared/ipc-contract'
 
 /**
  * Presentational transcript shapes the session screen (05b mockup) renders:

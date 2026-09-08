@@ -1,6 +1,6 @@
 import type { FileDiff, Session } from '../../../shared/ipc-contract'
-import type { PlanStep, QueuedPrompt } from '../session-view'
-import type { TranscriptEntry } from '../transcript-view'
+import type { PlanStep, QueuedPrompt } from '../view-models/session'
+import type { TranscriptEntry } from '../view-models/transcript'
 
 /**
  * Renderer-local placeholder types (ticket #49).
@@ -18,13 +18,13 @@ import type { TranscriptEntry } from '../transcript-view'
  * (real-IPC) mode keeps compiling and rendering - degraded, never broken.
  */
 
-export type { PlanStep, PlanStepState, QueuedPrompt } from '../session-view'
+export type { PlanStep, PlanStepState, QueuedPrompt } from '../view-models/session'
 export type {
   MessageEntry,
   PermissionCardEntry,
   ToolCallEntry,
   ToolCallState
-} from '../transcript-view'
+} from '../view-models/transcript'
 
 /** Per-file review progress the diff mockup tracks - distinct from git's FileDiffStatus. */
 export interface FileReviewMeta {

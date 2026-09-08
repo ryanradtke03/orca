@@ -1,5 +1,5 @@
 import type { Session } from '../../../../shared/ipc-contract'
-import { summarizeStatuses, type HomeSession, type ProjectSessionGroup } from '../../session-view'
+import { summarizeStatuses, type HomeSession, type ProjectSessionGroup } from '../../view-models/session'
 import { NeedsYouSection } from './NeedsYouSection'
 import { ProjectGroup } from './ProjectGroup'
 

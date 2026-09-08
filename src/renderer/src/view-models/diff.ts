@@ -1,4 +1,4 @@
-import type { FileDiff } from '../../shared/ipc-contract'
+import type { FileDiff } from '../../../shared/ipc-contract'
 
 /**
  * A FileDiff plus the renderer-only "has the user reviewed this file yet"

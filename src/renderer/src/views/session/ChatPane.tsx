@@ -4,7 +4,7 @@ import {
   type PermissionCardEntry,
   type ToolCallEntry,
   type TranscriptEntry
-} from '../../transcript-view'
+} from '../../view-models/transcript'
 
 function UserBubble({ message }: { message: TranscriptMessage }): React.JSX.Element {
   return (

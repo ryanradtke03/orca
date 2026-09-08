@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createMockOrca } from './mock-orca'
-import { needsAttentionSessions } from '../session-view'
+import { needsAttentionSessions } from '../view-models/session'
 import type { MockSession } from './placeholder-types'
 
 describe('createMockOrca fixtures', () => {

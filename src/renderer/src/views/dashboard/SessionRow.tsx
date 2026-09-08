@@ -1,4 +1,4 @@
-import { StatusMarker } from '../StatusMarker'
+import { StatusMarker } from '../../components/StatusMarker'
 import {
   contextualActionFor,
   describeStatus,
@@ -6,7 +6,7 @@ import {
   isAttentionStatus,
   isTerminalStatus,
   type HomeSession
-} from '../../session-view'
+} from '../../view-models/session'
 
 export function SessionRow({
   session,
