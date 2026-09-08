@@ -175,6 +175,7 @@ const FIXTURES: MockSessionFixture[] = [
       tokensUsed: 128_000,
       tokenLimit: 200_000,
       turns: 14,
+      activityLabel: '1m',
       additions: 412,
       deletions: 86,
       fileCount: 9,
@@ -233,6 +234,7 @@ const FIXTURES: MockSessionFixture[] = [
       tokensUsed: 42_000,
       tokenLimit: 200_000,
       turns: 6,
+      activityLabel: '2m',
       additions: 38,
       deletions: 4,
       fileCount: 2
@@ -263,6 +265,7 @@ const FIXTURES: MockSessionFixture[] = [
       tokensUsed: 0,
       tokenLimit: 200_000,
       turns: 0,
+      activityLabel: '31m',
       additions: 0,
       deletions: 0,
       fileCount: 0
@@ -326,6 +329,7 @@ const FIXTURES: MockSessionFixture[] = [
       tokensUsed: 71_000,
       tokenLimit: 200_000,
       turns: 9,
+      activityLabel: '6m',
       additions: 9,
       deletions: 0,
       fileCount: 1,

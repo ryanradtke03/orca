@@ -10,7 +10,7 @@ import { MockDevToolbar } from './mock/MockDevToolbar'
 type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type: 'session'; sessionId: string }
 
 export function App(): React.JSX.Element {
-  const { projects, sessions, refreshAll, refreshSessions, loadError } = useSessionPoll()
+  const { projects, sessions, refreshAll, loadError } = useSessionPoll()
   const [view, setView] = useState<View>({ type: 'dashboard' })
   const [statusMessage, setStatusMessage] = useState('')
 
@@ -29,63 +29,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  async function handleStopSession(sessionId: string): Promise<void> {
-    try {
-      await window.orca.stopSession(sessionId)
-      await refreshSessions()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to stop session: ${describeError(error)}`)
-    }
-  }
-
-  // Rethrows on failure so a caller with its own local feedback (e.g.
-  // ReplyForm, which shouldn't clear a message the send failed for) can
-  // react to the outcome directly instead of only through `statusMessage`.
-  async function handleRespondToPrompt(sessionId: string, response: string): Promise<void> {
-    try {
-      await window.orca.respondToPrompt(sessionId, response)
-      await refreshSessions()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to respond to prompt: ${describeError(error)}`)
-      throw error
-    }
-  }
-
-  async function handleRequestMerge(sessionId: string): Promise<void> {
-    try {
-      const result = await window.orca.requestMerge(sessionId)
-      if (result.mergeMode === 'pull-request') {
-        setStatusMessage(`Opened pull request: ${result.pullRequestUrl ?? ''}`)
-      } else if (result.mergeMode === 'local-merge') {
-        setStatusMessage('Merged into the main branch.')
-      } else {
-        setStatusMessage('Merge mode is Manual — merge the Diff yourself.')
-      }
-      await refreshSessions()
-    } catch (error) {
-      setStatusMessage(`Failed to request merge: ${describeError(error)}`)
-    }
-  }
-
-  async function handleDiscardWorktree(sessionId: string): Promise<void> {
-    // Discarding permanently throws away whatever unreviewed/unmerged work is
-    // still sitting in the worktree - confirm before doing something the user
-    // can't undo from within Orca.
-    if (!window.confirm('Discard this worktree? Any unmerged changes will be permanently lost.')) {
-      return
-    }
-
-    try {
-      await window.orca.discardWorktree(sessionId)
-      await refreshSessions()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to discard worktree: ${describeError(error)}`)
-    }
-  }
-
   let content: React.JSX.Element
   if (view.type === 'diff') {
     content = <DiffScreen sessionId={view.sessionId} sessions={sessions} onBack={backToDashboard} />
@@ -94,11 +37,10 @@ export function App(): React.JSX.Element {
       <SessionScreen
         sessionId={view.sessionId}
         sessions={sessions}
+        projects={projects}
         onBack={backToDashboard}
-        onStop={handleStopSession}
-        onRespond={handleRespondToPrompt}
-        onRequestMerge={handleRequestMerge}
-        onDiscardWorktree={handleDiscardWorktree}
+        onOpenSession={openSession}
+        onOpenDiff={openDiff}
       />
     )
   } else {

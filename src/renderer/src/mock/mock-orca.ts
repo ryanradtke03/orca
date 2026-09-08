@@ -8,6 +8,7 @@ import type {
   TranscriptMessage
 } from '../../../shared/ipc-contract'
 import { BASE_REF, cloneFixtures, MOCK_PROJECTS, type MockSessionFixture } from './fixtures'
+import type { MockSession } from './placeholder-types'
 
 /** Dev-only controls the mock exposes on top of the real OrcaApi surface. */
 export interface MockControls {
@@ -56,9 +57,13 @@ export function createMockOrca(): MockOrca {
   }
 
   // Hand back a shallow copy so callers can't mutate the store by reference -
-  // the real IPC path returns fresh objects deserialized over the bridge.
+  // the real IPC path returns fresh objects deserialized over the bridge. The
+  // rich transcript (tool calls + permission card) rides along on the session
+  // so the session screen (05b) can render it; getTranscript still narrows to
+  // plain messages for the contract shape live mode consumes.
   function snapshot(fixture: MockSessionFixture): Session {
-    return { ...fixture.session }
+    const session: MockSession = { ...fixture.session, transcript: fixture.transcript }
+    return session
   }
 
   function addFixture(fixture: MockSessionFixture): Session {
