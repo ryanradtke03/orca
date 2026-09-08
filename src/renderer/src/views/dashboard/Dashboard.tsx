@@ -10,7 +10,9 @@ export function Dashboard({
   statusMessage,
   onAddProject,
   onOpenSession,
-  onOpenDiff
+  onOpenDiff,
+  onStopSession,
+  onNewSession
 }: {
   projects: Project[]
   sessions: Session[]
@@ -18,6 +20,8 @@ export function Dashboard({
   onAddProject: () => Promise<void>
   onOpenSession: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
+  onStopSession: (sessionId: string) => void
+  onNewSession: (projectId: string) => void
 }): React.JSX.Element {
   const groups = groupSessionsByProject(projects, sessions)
   const attention = needsAttentionSessions(sessions)
@@ -44,6 +48,8 @@ export function Dashboard({
           projectNameFor={projectNameFor}
           onOpenSession={onOpenSession}
           onOpenDiff={onOpenDiff}
+          onStopSession={onStopSession}
+          onNewSession={onNewSession}
         />
       )}
     </div>

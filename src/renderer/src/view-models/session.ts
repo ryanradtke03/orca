@@ -259,6 +259,21 @@ export function needsAttentionSessions(sessions: Session[]): Session[] {
   return sessions.filter((session) => session.pendingPrompt !== undefined)
 }
 
+/**
+ * Applies a single updated Session to a list, in place of the poll's ~2s
+ * refresh: replaces the matching row by id, or appends it when new (a freshly
+ * spawned/adopted Session). Returns a new array and never mutates the input, so
+ * it drops straight into React state. The status poll reconciles anything this
+ * optimistic update missed on its next tick.
+ */
+export function upsertSession(sessions: Session[], session: Session): Session[] {
+  const index = sessions.findIndex((candidate) => candidate.id === session.id)
+  if (index === -1) return [...sessions, session]
+  const next = sessions.slice()
+  next[index] = session
+  return next
+}
+
 // --- Session screen (05b) helpers ------------------------------------------
 
 export interface NavBuckets {

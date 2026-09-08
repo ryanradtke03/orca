@@ -25,7 +25,8 @@ import {
   needsAttentionSessions,
   shortMergeMode,
   summarizeFilesTouched,
-  summarizeStatuses
+  summarizeStatuses,
+  upsertSession
 } from './session'
 import type { FileDiff } from '../../../shared/ipc-contract'
 
@@ -513,5 +514,33 @@ describe('summarizeFilesTouched', () => {
 
   it('reports no changes for an empty diff with no totals', () => {
     expect(summarizeFilesTouched([], {}).hasChanges).toBe(false)
+  })
+})
+
+describe('upsertSession', () => {
+  it('replaces the matching session by id, preserving position', () => {
+    const sessions = [
+      makeSession({ id: 'a', status: 'running' }),
+      makeSession({ id: 'b', status: 'running' }),
+      makeSession({ id: 'c', status: 'running' })
+    ]
+    const result = upsertSession(sessions, makeSession({ id: 'b', status: 'stopped' }))
+    expect(result.map((s) => s.id)).toEqual(['a', 'b', 'c'])
+    expect(result[1].status).toBe('stopped')
+  })
+
+  it('appends a session that is not already present (a fresh spawn)', () => {
+    const sessions = [makeSession({ id: 'a' })]
+    const result = upsertSession(sessions, makeSession({ id: 'new', status: 'idle' }))
+    expect(result.map((s) => s.id)).toEqual(['a', 'new'])
+  })
+
+  it('never mutates the input array or its sessions', () => {
+    const original = makeSession({ id: 'a', status: 'running' })
+    const sessions = [original]
+    const result = upsertSession(sessions, makeSession({ id: 'a', status: 'stopped' }))
+    expect(result).not.toBe(sessions)
+    expect(sessions[0]).toBe(original)
+    expect(original.status).toBe('running')
   })
 })

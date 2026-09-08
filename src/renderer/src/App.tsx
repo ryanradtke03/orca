@@ -7,11 +7,12 @@ import { describeError } from './describe-error'
 import { useSessionPoll } from './hooks/useSessionPoll'
 import { isMockMode } from './mock'
 import { MockDevToolbar } from './mock/MockDevToolbar'
+import { ModeBadge } from './components/ModeBadge'
 
 type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type: 'session'; sessionId: string }
 
 export function App(): React.JSX.Element {
-  const { projects, sessions, refreshAll, loadError } = useSessionPoll()
+  const { projects, sessions, refreshAll, applySession, loadError } = useSessionPoll()
   const [view, setView] = useState<View>({ type: 'dashboard' })
   const [statusMessage, setStatusMessage] = useState('')
 
@@ -30,6 +31,33 @@ export function App(): React.JSX.Element {
     }
   }
 
+  // Each mutation returns the updated Session, applied to local state at once
+  // (the poll is only the safety net). On failure we never crash: surface the
+  // message on the dashboard and always log it so it is visible in `dev`.
+  async function handleStopSession(sessionId: string): Promise<void> {
+    try {
+      applySession(await orca.stopSession(sessionId))
+      setStatusMessage('')
+    } catch (error) {
+      const message = `Failed to stop session: ${describeError(error)}`
+      console.error(message, error)
+      setStatusMessage(message)
+    }
+  }
+
+  // Spawn creates a bare idle session (no task, #44); driving it to `done`
+  // through the UI is #41's job. Here it just needs to appear as a new row.
+  async function handleNewSession(projectId: string): Promise<void> {
+    try {
+      applySession(await orca.spawnSession(projectId))
+      setStatusMessage('')
+    } catch (error) {
+      const message = `Failed to start session: ${describeError(error)}`
+      console.error(message, error)
+      setStatusMessage(message)
+    }
+  }
+
   let content: React.JSX.Element
   if (view.type === 'diff') {
     content = (
@@ -44,6 +72,8 @@ export function App(): React.JSX.Element {
         onBack={backToDashboard}
         onOpenSession={openSession}
         onOpenDiff={openDiff}
+        onStopSession={handleStopSession}
+        onNewSession={handleNewSession}
       />
     )
   } else {
@@ -55,6 +85,8 @@ export function App(): React.JSX.Element {
         onAddProject={handleAddProject}
         onOpenSession={openSession}
         onOpenDiff={openDiff}
+        onStopSession={handleStopSession}
+        onNewSession={handleNewSession}
       />
     )
   }
@@ -62,6 +94,7 @@ export function App(): React.JSX.Element {
   return (
     <>
       {content}
+      <ModeBadge />
       {/* Dev-only Home populated/empty toggle - mock mode only (ticket #49). */}
       {isMockMode() && <MockDevToolbar onToggle={() => void refreshAll()} />}
     </>

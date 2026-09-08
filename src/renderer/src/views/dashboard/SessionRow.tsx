@@ -12,25 +12,27 @@ export function SessionRow({
   session,
   projectName,
   onOpen,
-  onOpenDiff
+  onOpenDiff,
+  onStop
 }: {
   session: HomeSession
   projectName: string
   onOpen: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
+  onStop: (sessionId: string) => void
 }): React.JSX.Element {
   const branchClass = isTerminalStatus(session.status) ? 'text-secondary' : 'text-primary'
   const diffStat = formatDiffStat(session)
   const action = contextualActionFor(session)
 
   // The single contextual action either navigates (Review → the diff, Log →
-  // the session view) or is a still-inert side-effecting no-op (Stop); wiring
-  // Stop to real IPC is deferred (ticket #50). Either way it must not also
-  // trigger the row's own navigation, hence stopPropagation.
+  // the session view) or stops the session (Stop → engine mutation). Either way
+  // it must not also trigger the row's own navigation, hence stopPropagation.
   function runAction(event: React.MouseEvent): void {
     event.stopPropagation()
     if (action.kind === 'review') onOpenDiff(session.id)
     else if (action.kind === 'log') onOpen(session.id)
+    else onStop(session.id)
   }
 
   return (

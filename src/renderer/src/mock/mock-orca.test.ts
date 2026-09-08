@@ -88,6 +88,19 @@ describe('createMockOrca mutations keep the clickthrough consistent', () => {
     expect(after.status).toBe('stopped')
   })
 
+  it('spawnSession adds a bare idle session to the project', async () => {
+    const { api } = createMockOrca()
+    const projects = await api.listProjects()
+    const before = await api.listSessions()
+    const spawned = await api.spawnSession(projects[0].id)
+    expect(spawned.status).toBe('idle')
+    expect(spawned.projectId).toBe(projects[0].id)
+    expect(spawned.pendingPrompt).toBeUndefined()
+    const after = await api.listSessions()
+    expect(after).toHaveLength(before.length + 1)
+    expect(after.some((session) => session.id === spawned.id)).toBe(true)
+  })
+
   it('respondToPrompt clears a pending permission prompt', async () => {
     const { api } = createMockOrca()
     const waiting = (await api.listSessions()).find(
