@@ -1,14 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
-import type { FileDiff, Project, Session, TranscriptMessage } from '../../../../shared/ipc-contract'
-import { describeError } from '../../describe-error'
-import { canViewDiff, describeStatusPhrase, type DetailSession } from '../../session-view'
-import { messagesToEntries, type TranscriptEntry } from '../../transcript-view'
+import type { Project, Session } from '../../../../shared/ipc-contract'
+import { useDiff } from '../../hooks/useDiff'
+import { useTranscript } from '../../hooks/useTranscript'
+import { canViewDiff, describeStatusPhrase, type DetailSession } from '../../view-models/session'
+import { messagesToEntries, type TranscriptEntry } from '../../view-models/transcript'
 import { ChatPane } from './ChatPane'
 import { Composer } from './Composer'
 import { Inspector } from './Inspector'
 import { SessionNav } from './SessionNav'
-
-const TRANSCRIPT_POLL_INTERVAL_MS = 2000
 
 function BackButton({ onBack }: { onBack: () => void }): React.JSX.Element {
   return (
@@ -87,68 +85,12 @@ export function SessionScreen({
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId) as DetailSession | undefined
 
-  const [files, setFiles] = useState<FileDiff[] | null>(null)
-  const [messages, setMessages] = useState<TranscriptMessage[]>([])
-  const [loadError, setLoadError] = useState<string | null>(null)
-
-  // Loads once per sessionId - re-fetching a `git diff` on every 2s status
-  // poll tick would be wasteful, so this only reacts to navigating to a
-  // (possibly different) session, not to `sessions` changing underneath it.
-  useEffect(() => {
-    let cancelled = false
-    setFiles(null)
-    setMessages([])
-    setLoadError(null)
-
-    Promise.all([window.orca.getDiff(sessionId), window.orca.getTranscript(sessionId)])
-      .then(([nextFiles, nextMessages]) => {
-        if (cancelled) return
-        setFiles(nextFiles)
-        setMessages(nextMessages)
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setLoadError(describeError(error))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [sessionId])
-
-  // The plain transcript live-updates on a 2s cadence independent of the diff
-  // (#45). It's the live-mode fallback: in mock mode the richer transcript
-  // (tool calls + permission card) rides along on the session itself and is
-  // preferred below. `inFlight` guards a slow fetch overlapping the next tick;
-  // `cancelled` drops a response that resolves after navigating away. A
-  // transient poll failure only logs - it doesn't touch `loadError`, which is
-  // reserved for the initial load.
-  const inFlight = useRef(false)
-  useEffect(() => {
-    if (files === null) return
-    let cancelled = false
-
-    const interval = setInterval(() => {
-      if (inFlight.current) return
-      inFlight.current = true
-      window.orca
-        .getTranscript(sessionId)
-        .then((nextMessages) => {
-          if (!cancelled) setMessages(nextMessages)
-        })
-        .catch((error: unknown) => {
-          if (!cancelled) console.error(`Failed to refresh transcript for ${sessionId}:`, error)
-        })
-        .finally(() => {
-          inFlight.current = false
-        })
-    }, TRANSCRIPT_POLL_INTERVAL_MS)
-
-    return () => {
-      cancelled = true
-      clearInterval(interval)
-    }
-  }, [sessionId, files])
+  // The diff feeds the inspector; the transcript live-updates on a 2s cadence.
+  // Both load once per sessionId (not on every status-poll tick). Either
+  // initial-load failure errors the whole screen.
+  const { files, loadError: diffError } = useDiff(sessionId)
+  const { messages, loadError: transcriptError } = useTranscript(sessionId)
+  const loadError = diffError ?? transcriptError
 
   if (!session) {
     return <SessionShell onBack={onBack}>Failed to load session: Unknown session: {sessionId}</SessionShell>

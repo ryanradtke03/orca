@@ -1,5 +1,5 @@
-import { bucketSessionsForNav, describeNavDetail, type DetailSession } from '../../session-view'
-import { StatusMarker } from '../StatusMarker'
+import { bucketSessionsForNav, describeNavDetail, type DetailSession } from '../../view-models/session'
+import { StatusMarker } from '../../components/StatusMarker'
 
 function NavRow({
   session,

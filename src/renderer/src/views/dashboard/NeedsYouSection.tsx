@@ -1,5 +1,5 @@
-import { describeNeedsYou, type HomeSession } from '../../session-view'
-import { StatusMarker } from '../StatusMarker'
+import { describeNeedsYou, type HomeSession } from '../../view-models/session'
+import { StatusMarker } from '../../components/StatusMarker'
 
 /**
  * The inline actions a "Needs you" card offers are still visual-only no-ops -

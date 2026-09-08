@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Project, Session } from '../../../shared/ipc-contract'
+import { orca } from '../api/orca-client'
 import { describeError } from '../describe-error'
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 2000
@@ -29,7 +30,7 @@ export function useSessionPoll(): SessionPoll {
   const refreshAll = useCallback(async () => {
     const token = ++allToken.current
     try {
-      const [nextProjects, nextSessions] = await Promise.all([window.orca.listProjects(), window.orca.listSessions()])
+      const [nextProjects, nextSessions] = await Promise.all([orca.listProjects(), orca.listSessions()])
       if (token !== allToken.current) return
       setProjects(nextProjects)
       setSessions(nextSessions)
@@ -43,7 +44,7 @@ export function useSessionPoll(): SessionPoll {
   const refreshSessions = useCallback(async () => {
     const token = ++sessionsToken.current
     try {
-      const nextSessions = await window.orca.listSessions()
+      const nextSessions = await orca.listSessions()
       if (token !== sessionsToken.current) return
       setSessions(nextSessions)
       setLoadError('')

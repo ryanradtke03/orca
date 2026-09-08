@@ -6,7 +6,7 @@ import {
   type DetailSession,
   type PlanStep,
   type QueuedPrompt
-} from '../../session-view'
+} from '../../view-models/session'
 
 function Section({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element {
   return (

@@ -1,5 +1,5 @@
 import type { Project, Session } from '../../../../shared/ipc-contract'
-import { groupSessionsByProject, needsAttentionSessions, type HomeSession } from '../../session-view'
+import { groupSessionsByProject, needsAttentionSessions, type HomeSession } from '../../view-models/session'
 import { EmptyState } from './EmptyState'
 import { MainPane } from './MainPane'
 import { Sidebar } from './Sidebar'

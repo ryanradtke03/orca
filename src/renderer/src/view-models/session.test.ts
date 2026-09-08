@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Project, Session } from '../../shared/ipc-contract'
+import type { Project, Session } from '../../../shared/ipc-contract'
 import {
   bucketSessionsForNav,
   canDiscardWorktree,
@@ -26,8 +26,8 @@ import {
   shortMergeMode,
   summarizeFilesTouched,
   summarizeStatuses
-} from './session-view'
-import type { FileDiff } from '../../shared/ipc-contract'
+} from './session'
+import type { FileDiff } from '../../../shared/ipc-contract'
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {

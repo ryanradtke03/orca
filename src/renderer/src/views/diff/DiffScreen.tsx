@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { MergeMode, Project, Session } from '../../../../shared/ipc-contract'
-import { describeError } from '../../describe-error'
+import { useDiff } from '../../hooks/useDiff'
 import {
   extractDisplayLines,
   fileBasename,
@@ -9,9 +9,9 @@ import {
   summarizeReview,
   type DiffRow,
   type ReviewFileDiff
-} from '../../diff-view'
-import { describeMergeMode, describeStatus } from '../../session-view'
-import { StatusMarker } from '../StatusMarker'
+} from '../../view-models/diff'
+import { describeMergeMode, describeStatus } from '../../view-models/session'
+import { StatusMarker } from '../../components/StatusMarker'
 
 function BackButton({ onBack }: { onBack: () => void }): React.JSX.Element {
   return (
@@ -277,34 +277,14 @@ export function DiffScreen({
   onBack: () => void
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId)
-  const [files, setFiles] = useState<ReviewFileDiff[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  // getDiff rides the per-file `reviewed` flag along in mock mode; live mode
+  // omits it and the tree degrades to "nothing reviewed yet".
+  const { files: rawFiles, loadError } = useDiff(sessionId)
+  const files = rawFiles as ReviewFileDiff[] | null
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    setFiles(null)
-    setLoadError(null)
-    setSelectedPath(null)
-
-    // getDiff rides the per-file `reviewed` flag along in mock mode; live mode
-    // omits it and the tree degrades to "nothing reviewed yet".
-    window.orca
-      .getDiff(sessionId)
-      .then((nextFiles) => {
-        if (!cancelled) setFiles(nextFiles as ReviewFileDiff[])
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setLoadError(describeError(error))
-      })
-
-    return () => {
-      cancelled = true
-    }
-    // Only depends on sessionId, not the `session` object - `sessions` gets new
-    // identities on every 2s poll tick and re-shelling to `git diff` per tick
-    // would be wasteful. Re-fetches only on a fresh navigation.
-  }, [sessionId])
+  // Reset the selection when navigating to a different session's diff.
+  useEffect(() => setSelectedPath(null), [sessionId])
 
   if (!session) return <DiffShell onBack={onBack}>Failed to load diff: Unknown session: {sessionId}</DiffShell>
   if (loadError) return <DiffShell onBack={onBack}>Failed to load diff: {loadError}</DiffShell>

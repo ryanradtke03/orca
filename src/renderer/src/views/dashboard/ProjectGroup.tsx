@@ -1,4 +1,4 @@
-import { shortMergeMode, type HomeSession, type ProjectSessionGroup } from '../../session-view'
+import { shortMergeMode, type HomeSession, type ProjectSessionGroup } from '../../view-models/session'
 import { SessionRow } from './SessionRow'
 
 export function ProjectGroup({

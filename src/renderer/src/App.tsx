@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Dashboard } from './components/dashboard/Dashboard'
-import { DiffScreen } from './components/diff/DiffScreen'
-import { SessionScreen } from './components/session/SessionScreen'
+import { orca } from './api/orca-client'
+import { Dashboard } from './views/dashboard/Dashboard'
+import { DiffScreen } from './views/diff/DiffScreen'
+import { SessionScreen } from './views/session/SessionScreen'
 import { describeError } from './describe-error'
 import { useSessionPoll } from './hooks/useSessionPoll'
 import { isMockMode } from './mock'
@@ -20,7 +21,7 @@ export function App(): React.JSX.Element {
 
   async function handleAddProject(): Promise<void> {
     try {
-      const project = await window.orca.addProjectViaDialog()
+      const project = await orca.addProjectViaDialog()
       if (!project) return
       await refreshAll()
       setStatusMessage('')

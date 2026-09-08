@@ -1,5 +1,5 @@
-import type { FileDiff, MergeMode, Project, Session, SessionStatus } from '../../shared/ipc-contract'
-import type { TranscriptEntry } from './transcript-view'
+import type { FileDiff, MergeMode, Project, Session, SessionStatus } from '../../../shared/ipc-contract'
+import type { TranscriptEntry } from './transcript'
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   running: 'Running',

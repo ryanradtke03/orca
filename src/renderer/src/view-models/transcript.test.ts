@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { TranscriptMessage } from '../../shared/ipc-contract'
-import { messagesToEntries, toolNameFromCommand } from './transcript-view'
+import type { TranscriptMessage } from '../../../shared/ipc-contract'
+import { messagesToEntries, toolNameFromCommand } from './transcript'
 
 describe('toolNameFromCommand', () => {
   it('pulls the tool name out of a Tool(command) string', () => {
