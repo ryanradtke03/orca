@@ -31,7 +31,9 @@ export function App(): React.JSX.Element {
 
   let content: React.JSX.Element
   if (view.type === 'diff') {
-    content = <DiffScreen sessionId={view.sessionId} sessions={sessions} onBack={backToDashboard} />
+    content = (
+      <DiffScreen sessionId={view.sessionId} sessions={sessions} projects={projects} onBack={backToDashboard} />
+    )
   } else if (view.type === 'session') {
     content = (
       <SessionScreen

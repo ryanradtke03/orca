@@ -152,6 +152,105 @@ const ERRORED_DIFF: FileDiff[] = [
 // per-file review progress (04a-diff-viewer-file-tree).
 const HERO_DIFF: MockFileDiff[] = [IPC_CONTRACT_DIFF, MAIN_INDEX_DIFF, ENGINE_DIFF]
 
+/** Builds a MockFileDiff from a path and its hunk lines, prepending git's own file header. */
+function treeFile(
+  path: string,
+  status: MockFileDiff['status'],
+  additions: number,
+  deletions: number,
+  reviewed: boolean,
+  hunks: string[]
+): MockFileDiff {
+  return {
+    path,
+    status,
+    additions,
+    deletions,
+    reviewed,
+    diffText: [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...hunks].join('\n')
+  }
+}
+
+// The multi-folder diff the diff viewer (04a) is built around: a grouped file
+// tree (src/shared, src/main, src/main/engine, src/preload, src/renderer/src,
+// docs/adr), per-file line counts, and three files already reviewed.
+const DIFF_TREE: MockFileDiff[] = [
+  treeFile('src/shared/ipc-contract.ts', 'modified', 64, 9, false, [
+    '@@ -12,6 +12,10 @@ export interface Project',
+    ' export type SessionStatus =',
+    "   | 'running'",
+    "-  | 'waiting'",
+    "+  | 'waiting-on-permission'",
+    "+  | 'waiting-on-input'",
+    "   | 'idle'",
+    "+  | 'stopped'",
+    ' ',
+    ' export interface Session {',
+    '@@ -30,4 +34,7 @@ export const IPC_CHANNELS',
+    ' export const IPC_CHANNELS = {',
+    "   ping: 'engine:ping',",
+    "+  spawnSession: 'session:spawn',",
+    "+  stopSession: 'session:stop'",
+    ' } as const'
+  ]),
+  treeFile('src/main/ipc.ts', 'modified', 51, 4, false, [
+    '@@ -1,4 +1,6 @@',
+    " import { ipcMain } from 'electron'",
+    "+import { IPC_CHANNELS } from '../shared/ipc-contract'",
+    ' ',
+    '+export function registerIpc() {}'
+  ]),
+  treeFile('src/main/composition-root.ts', 'modified', 17, 2, false, [
+    '@@ -8,3 +8,5 @@ export function createApp',
+    '   const engine = createEngine()',
+    '+  const ipc = registerIpc()',
+    '+  return { engine, ipc }',
+    ' }'
+  ]),
+  treeFile('src/main/engine/engine.ts', 'modified', 188, 3, true, [
+    '@@ -40,3 +40,8 @@ export function createEngine',
+    '   async stopSession(id: string) {',
+    '+    const session = requireSession(id)',
+    "+    session.status = 'stopped'",
+    '+    return session',
+    '   }'
+  ]),
+  treeFile('src/main/engine/worktree.ts', 'added', 42, 0, true, [
+    '@@ -0,0 +1,4 @@',
+    '+export async function createWorktree(branch: string) {',
+    '+  await git(`worktree add ${branch}`)',
+    '+  return branch',
+    '+}'
+  ]),
+  treeFile('src/preload/index.ts', 'modified', 22, 1, false, [
+    '@@ -1,3 +1,5 @@',
+    " import { contextBridge } from 'electron'",
+    "+import { orcaApi } from './orca-api'",
+    ' ',
+    "+contextBridge.exposeInMainWorld('orca', orcaApi)"
+  ]),
+  treeFile('src/renderer/src/main.ts', 'modified', 6, 301, true, [
+    '@@ -1,6 +1,2 @@',
+    "-import { renderDashboard } from './legacy/dashboard'",
+    "-import { renderDiff } from './legacy/diff'",
+    "-renderDashboard()",
+    "+import { mount } from './app'",
+    '+mount()'
+  ]),
+  treeFile('src/renderer/src/orca-window.d.ts', 'added', 8, 0, false, [
+    '@@ -0,0 +1,3 @@',
+    '+interface Window {',
+    '+  orca: OrcaApi',
+    '+}'
+  ]),
+  treeFile('docs/adr/0004-session-status.md', 'added', 31, 0, false, [
+    '@@ -0,0 +1,3 @@',
+    '+# ADR 0004: Session status',
+    '+',
+    '+Adds a `stopped` state to the SessionStatus union.'
+  ])
+]
+
 // --- Sessions --------------------------------------------------------------
 
 const FIXTURES: MockSessionFixture[] = [
@@ -286,11 +385,11 @@ const FIXTURES: MockSessionFixture[] = [
       tokensUsed: 156_000,
       tokenLimit: 200_000,
       turns: 22,
-      additions: 126,
-      deletions: 301,
-      fileCount: 14
+      additions: 429,
+      deletions: 320,
+      fileCount: 9
     },
-    diff: HERO_DIFF,
+    diff: DIFF_TREE,
     transcript: [
       {
         kind: 'message',
