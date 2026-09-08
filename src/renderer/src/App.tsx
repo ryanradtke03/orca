@@ -5,6 +5,8 @@ import { DiffScreen } from './components/diff/DiffScreen'
 import { SessionScreen } from './components/session/SessionScreen'
 import { describeError } from './describe-error'
 import { useSessionPoll } from './hooks/useSessionPoll'
+import { isMockMode } from './mock'
+import { MockDevToolbar } from './mock/MockDevToolbar'
 
 type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type: 'session'; sessionId: string }
 
@@ -116,12 +118,11 @@ export function App(): React.JSX.Element {
     }
   }
 
+  let content: React.JSX.Element
   if (view.type === 'diff') {
-    return <DiffScreen sessionId={view.sessionId} sessions={sessions} onBack={backToDashboard} />
-  }
-
-  if (view.type === 'session') {
-    return (
+    content = <DiffScreen sessionId={view.sessionId} sessions={sessions} onBack={backToDashboard} />
+  } else if (view.type === 'session') {
+    content = (
       <SessionScreen
         sessionId={view.sessionId}
         sessions={sessions}
@@ -132,22 +133,30 @@ export function App(): React.JSX.Element {
         onDiscardWorktree={handleDiscardWorktree}
       />
     )
+  } else {
+    content = (
+      <Dashboard
+        projects={projects}
+        sessions={sessions}
+        statusMessage={statusMessage || loadError}
+        onAddProject={handleAddProject}
+        onNewSession={handleNewSession}
+        onSetProjectMergeMode={handleSetProjectMergeMode}
+        onAdoptSession={handleAdoptSession}
+        onOpenSession={openSession}
+        onOpenDiff={openDiff}
+        onStop={handleStopSession}
+        onRequestMerge={handleRequestMerge}
+        onDiscardWorktree={handleDiscardWorktree}
+      />
+    )
   }
 
   return (
-    <Dashboard
-      projects={projects}
-      sessions={sessions}
-      statusMessage={statusMessage || loadError}
-      onAddProject={handleAddProject}
-      onNewSession={handleNewSession}
-      onSetProjectMergeMode={handleSetProjectMergeMode}
-      onAdoptSession={handleAdoptSession}
-      onOpenSession={openSession}
-      onOpenDiff={openDiff}
-      onStop={handleStopSession}
-      onRequestMerge={handleRequestMerge}
-      onDiscardWorktree={handleDiscardWorktree}
-    />
+    <>
+      {content}
+      {/* Dev-only Home populated/empty toggle - mock mode only (ticket #49). */}
+      {isMockMode() && <MockDevToolbar onToggle={() => void refreshAll()} />}
+    </>
   )
 }
