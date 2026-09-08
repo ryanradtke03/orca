@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import type { MergeMode } from '../../shared/ipc-contract'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { DiffScreen } from './components/diff/DiffScreen'
 import { SessionScreen } from './components/session/SessionScreen'
@@ -30,16 +29,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  async function handleNewSession(projectId: string): Promise<void> {
-    try {
-      await window.orca.spawnSession(projectId)
-      await refreshAll()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to spawn session: ${describeError(error)}`)
-    }
-  }
-
   async function handleStopSession(sessionId: string): Promise<void> {
     try {
       await window.orca.stopSession(sessionId)
@@ -64,16 +53,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  async function handleSetProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<void> {
-    try {
-      await window.orca.setProjectMergeMode(projectId, mergeMode)
-      await refreshAll()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to set merge mode: ${describeError(error)}`)
-    }
-  }
-
   async function handleRequestMerge(sessionId: string): Promise<void> {
     try {
       const result = await window.orca.requestMerge(sessionId)
@@ -87,17 +66,6 @@ export function App(): React.JSX.Element {
       await refreshSessions()
     } catch (error) {
       setStatusMessage(`Failed to request merge: ${describeError(error)}`)
-    }
-  }
-
-  async function handleAdoptSession(pid: number, directory: string): Promise<void> {
-    try {
-      await window.orca.adoptSession(pid, directory)
-      await refreshAll()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to adopt session: ${describeError(error)}`)
-      throw error
     }
   }
 
@@ -140,14 +108,8 @@ export function App(): React.JSX.Element {
         sessions={sessions}
         statusMessage={statusMessage || loadError}
         onAddProject={handleAddProject}
-        onNewSession={handleNewSession}
-        onSetProjectMergeMode={handleSetProjectMergeMode}
-        onAdoptSession={handleAdoptSession}
         onOpenSession={openSession}
         onOpenDiff={openDiff}
-        onStop={handleStopSession}
-        onRequestMerge={handleRequestMerge}
-        onDiscardWorktree={handleDiscardWorktree}
       />
     )
   }

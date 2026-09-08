@@ -1,6 +1,5 @@
 import type { Project, Session } from '../../../../shared/ipc-contract'
 import type { ProjectSessionGroup } from '../../session-view'
-import { AdoptForm } from './AdoptForm'
 
 function scrollToId(id: string): void {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -12,8 +11,7 @@ export function Sidebar({
   groups,
   attention,
   statusMessage,
-  onAddProject,
-  onAdoptSession
+  onAddProject
 }: {
   projects: Project[]
   sessions: Session[]
@@ -21,7 +19,6 @@ export function Sidebar({
   attention: Session[]
   statusMessage: string
   onAddProject: () => void
-  onAdoptSession: (pid: number, directory: string) => Promise<void>
 }): React.JSX.Element {
   const subtitle = projects.length === 0 ? 'no projects' : `${sessions.length} sessions · ${projects.length} projects`
 
@@ -70,7 +67,6 @@ export function Sidebar({
         >
           + Add project
         </button>
-        <AdoptForm onAdopt={onAdoptSession} />
       </div>
 
       {statusMessage && (

@@ -1,5 +1,5 @@
-import type { MergeMode, Session } from '../../../../shared/ipc-contract'
-import { summarizeStatuses, type ProjectSessionGroup } from '../../session-view'
+import type { Session } from '../../../../shared/ipc-contract'
+import { summarizeStatuses, type HomeSession, type ProjectSessionGroup } from '../../session-view'
 import { NeedsYouSection } from './NeedsYouSection'
 import { ProjectGroup } from './ProjectGroup'
 
@@ -7,24 +7,16 @@ export function MainPane({
   sessions,
   groups,
   attention,
+  projectNameFor,
   onOpenSession,
-  onOpenDiff,
-  onNewSession,
-  onSetProjectMergeMode,
-  onStop,
-  onRequestMerge,
-  onDiscardWorktree
+  onOpenDiff
 }: {
   sessions: Session[]
   groups: ProjectSessionGroup[]
-  attention: Session[]
+  attention: HomeSession[]
+  projectNameFor: (projectId: string) => string
   onOpenSession: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
-  onNewSession: (projectId: string) => void
-  onSetProjectMergeMode: (projectId: string, mergeMode: MergeMode) => void
-  onStop: (sessionId: string) => void
-  onRequestMerge: (sessionId: string) => void
-  onDiscardWorktree: (sessionId: string) => void
 }): React.JSX.Element {
   const stats = summarizeStatuses(sessions)
 
@@ -37,23 +29,23 @@ export function MainPane({
           </h1>
           <div className="mt-[5px] font-mono text-[11px] text-tertiary">{stats || 'No sessions yet'}</div>
         </div>
+        {/* Header actions are still visual-only no-ops - wiring New session /
+            Adopt session to real IPC is deferred (ticket #50). */}
+        <div className="flex flex-none items-center gap-2.5">
+          <button type="button" className="btn-ghost">
+            Adopt session
+          </button>
+          <button type="button" className="btn">
+            New session
+          </button>
+        </div>
       </div>
 
-      <NeedsYouSection attention={attention} onOpen={onOpenSession} />
+      <NeedsYouSection attention={attention} projectNameFor={projectNameFor} onOpen={onOpenSession} />
 
       <div className="pb-6">
         {groups.map((group) => (
-          <ProjectGroup
-            key={group.project.id}
-            group={group}
-            onSetProjectMergeMode={onSetProjectMergeMode}
-            onNewSession={onNewSession}
-            onOpenSession={onOpenSession}
-            onOpenDiff={onOpenDiff}
-            onStop={onStop}
-            onRequestMerge={onRequestMerge}
-            onDiscardWorktree={onDiscardWorktree}
-          />
+          <ProjectGroup key={group.project.id} group={group} onOpenSession={onOpenSession} onOpenDiff={onOpenDiff} />
         ))}
       </div>
     </main>
