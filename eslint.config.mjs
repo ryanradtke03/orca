@@ -7,8 +7,12 @@ export default tseslint.config(
       'out/**',
       'dist/**',
       'node_modules/**',
+      // Agent scratch worktrees - separate git checkouts that carry their own
+      // tsconfig/eslint config, which otherwise makes the TS parser's root
+      // detection ambiguous and breaks linting for the whole repo.
+      '.claude/**',
       'scripts/fix-node-pty-permissions.cjs',
-      'src/main/engine/real-process-adapter.fake-cli.cjs'
+      'src/main/engine/claude-cli/fake-cli.cjs'
     ]
   },
   js.configs.recommended,

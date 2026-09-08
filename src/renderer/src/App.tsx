@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import type { MergeMode } from '../../shared/ipc-contract'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { DiffScreen } from './components/diff/DiffScreen'
 import { SessionScreen } from './components/session/SessionScreen'
 import { describeError } from './describe-error'
 import { useSessionPoll } from './hooks/useSessionPoll'
+import { isMockMode } from './mock'
+import { MockDevToolbar } from './mock/MockDevToolbar'
 
 type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type: 'session'; sessionId: string }
 
@@ -25,16 +26,6 @@ export function App(): React.JSX.Element {
       setStatusMessage('')
     } catch (error) {
       setStatusMessage(`Failed to add project: ${describeError(error)}`)
-    }
-  }
-
-  async function handleNewSession(projectId: string): Promise<void> {
-    try {
-      await window.orca.spawnSession(projectId)
-      await refreshAll()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to spawn session: ${describeError(error)}`)
     }
   }
 
@@ -62,16 +53,6 @@ export function App(): React.JSX.Element {
     }
   }
 
-  async function handleSetProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<void> {
-    try {
-      await window.orca.setProjectMergeMode(projectId, mergeMode)
-      await refreshAll()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to set merge mode: ${describeError(error)}`)
-    }
-  }
-
   async function handleRequestMerge(sessionId: string): Promise<void> {
     try {
       const result = await window.orca.requestMerge(sessionId)
@@ -85,17 +66,6 @@ export function App(): React.JSX.Element {
       await refreshSessions()
     } catch (error) {
       setStatusMessage(`Failed to request merge: ${describeError(error)}`)
-    }
-  }
-
-  async function handleAdoptSession(pid: number, directory: string): Promise<void> {
-    try {
-      await window.orca.adoptSession(pid, directory)
-      await refreshAll()
-      setStatusMessage('')
-    } catch (error) {
-      setStatusMessage(`Failed to adopt session: ${describeError(error)}`)
-      throw error
     }
   }
 
@@ -116,12 +86,11 @@ export function App(): React.JSX.Element {
     }
   }
 
+  let content: React.JSX.Element
   if (view.type === 'diff') {
-    return <DiffScreen sessionId={view.sessionId} sessions={sessions} onBack={backToDashboard} />
-  }
-
-  if (view.type === 'session') {
-    return (
+    content = <DiffScreen sessionId={view.sessionId} sessions={sessions} onBack={backToDashboard} />
+  } else if (view.type === 'session') {
+    content = (
       <SessionScreen
         sessionId={view.sessionId}
         sessions={sessions}
@@ -132,22 +101,24 @@ export function App(): React.JSX.Element {
         onDiscardWorktree={handleDiscardWorktree}
       />
     )
+  } else {
+    content = (
+      <Dashboard
+        projects={projects}
+        sessions={sessions}
+        statusMessage={statusMessage || loadError}
+        onAddProject={handleAddProject}
+        onOpenSession={openSession}
+        onOpenDiff={openDiff}
+      />
+    )
   }
 
   return (
-    <Dashboard
-      projects={projects}
-      sessions={sessions}
-      statusMessage={statusMessage || loadError}
-      onAddProject={handleAddProject}
-      onNewSession={handleNewSession}
-      onSetProjectMergeMode={handleSetProjectMergeMode}
-      onAdoptSession={handleAdoptSession}
-      onOpenSession={openSession}
-      onOpenDiff={openDiff}
-      onStop={handleStopSession}
-      onRequestMerge={handleRequestMerge}
-      onDiscardWorktree={handleDiscardWorktree}
-    />
+    <>
+      {content}
+      {/* Dev-only Home populated/empty toggle - mock mode only (ticket #49). */}
+      {isMockMode() && <MockDevToolbar onToggle={() => void refreshAll()} />}
+    </>
   )
 }

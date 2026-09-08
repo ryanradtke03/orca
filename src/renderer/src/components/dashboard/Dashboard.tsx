@@ -1,5 +1,5 @@
-import type { MergeMode, Project, Session } from '../../../../shared/ipc-contract'
-import { groupSessionsByProject, needsAttentionSessions } from '../../session-view'
+import type { Project, Session } from '../../../../shared/ipc-contract'
+import { groupSessionsByProject, needsAttentionSessions, type HomeSession } from '../../session-view'
 import { EmptyState } from './EmptyState'
 import { MainPane } from './MainPane'
 import { Sidebar } from './Sidebar'
@@ -9,30 +9,20 @@ export function Dashboard({
   sessions,
   statusMessage,
   onAddProject,
-  onNewSession,
-  onSetProjectMergeMode,
-  onAdoptSession,
   onOpenSession,
-  onOpenDiff,
-  onStop,
-  onRequestMerge,
-  onDiscardWorktree
+  onOpenDiff
 }: {
   projects: Project[]
   sessions: Session[]
   statusMessage: string
   onAddProject: () => Promise<void>
-  onNewSession: (projectId: string) => Promise<void>
-  onSetProjectMergeMode: (projectId: string, mergeMode: MergeMode) => Promise<void>
-  onAdoptSession: (pid: number, directory: string) => Promise<void>
   onOpenSession: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
-  onStop: (sessionId: string) => Promise<void>
-  onRequestMerge: (sessionId: string) => Promise<void>
-  onDiscardWorktree: (sessionId: string) => Promise<void>
 }): React.JSX.Element {
   const groups = groupSessionsByProject(projects, sessions)
   const attention = needsAttentionSessions(sessions)
+  const projectNames = new Map(projects.map((project) => [project.id, project.name]))
+  const projectNameFor = (projectId: string): string => projectNames.get(projectId) ?? projectId
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -43,7 +33,6 @@ export function Dashboard({
         attention={attention}
         statusMessage={statusMessage}
         onAddProject={() => void onAddProject()}
-        onAdoptSession={onAdoptSession}
       />
       {projects.length === 0 ? (
         <EmptyState onAddProject={() => void onAddProject()} />
@@ -51,14 +40,10 @@ export function Dashboard({
         <MainPane
           sessions={sessions}
           groups={groups}
-          attention={attention}
+          attention={attention as HomeSession[]}
+          projectNameFor={projectNameFor}
           onOpenSession={onOpenSession}
           onOpenDiff={onOpenDiff}
-          onNewSession={(projectId) => void onNewSession(projectId)}
-          onSetProjectMergeMode={(projectId, mergeMode) => void onSetProjectMergeMode(projectId, mergeMode)}
-          onStop={(sessionId) => void onStop(sessionId)}
-          onRequestMerge={(sessionId) => void onRequestMerge(sessionId)}
-          onDiscardWorktree={(sessionId) => void onDiscardWorktree(sessionId)}
         />
       )}
     </div>

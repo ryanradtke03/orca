@@ -16,6 +16,10 @@ export function EmptyState({ onAddProject }: { onAddProject: () => void }): Reac
           <button type="button" className="btn px-5 py-[11px] text-[12.5px]" onClick={onAddProject}>
             Add project…
           </button>
+          {/* Inert no-op - wiring adopt-from-empty to real IPC is deferred (ticket #50). */}
+          <button type="button" className="btn-ghost px-5 py-[11px] text-[12.5px]">
+            Adopt a running session
+          </button>
         </div>
         <div className="mt-[34px] flex justify-center border-t border-border-faint pt-[22px]">
           {[

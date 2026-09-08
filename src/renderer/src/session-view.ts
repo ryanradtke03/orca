@@ -80,6 +80,96 @@ export function describeMergeMode(mergeMode: MergeMode): string {
   return MERGE_MODE_LABELS[mergeMode]
 }
 
+const SHORT_MERGE_MODE_LABELS: Record<MergeMode, string> = {
+  manual: 'manual',
+  'local-merge': 'local',
+  'pull-request': 'PR'
+}
+
+/** The compact merge-mode tag a Home group header shows, e.g. "merge: PR". */
+export function shortMergeMode(mergeMode: MergeMode): string {
+  return SHORT_MERGE_MODE_LABELS[mergeMode]
+}
+
+/**
+ * Optional per-Session presentation fields the mock backend rides along on a
+ * Session and live mode omits (ticket #49's placeholder types). Home reads
+ * them for its diff-stat column and "Needs you" cards; every one is optional so
+ * a real-IPC Session renders degraded, never broken.
+ */
+export interface SessionDisplay {
+  additions?: number
+  deletions?: number
+  fileCount?: number
+  /** Free-text note the "Needs you" card shows, e.g. "waiting on your reply for 6m". */
+  attentionNote?: string
+}
+
+/** A Session as the Home screen renders it - the contract shape plus the optional display fields above. */
+export type HomeSession = Session & SessionDisplay
+
+/**
+ * The right-hand diff-stat column on a Home row, e.g. "+412 −86 · 9 files".
+ * Empty when the counts are absent (live mode); "no changes" when the Session
+ * has touched nothing yet.
+ */
+export function formatDiffStat({ additions, deletions, fileCount }: HomeSession): string {
+  if (additions === undefined && deletions === undefined && fileCount === undefined) return ''
+  const add = additions ?? 0
+  const del = deletions ?? 0
+  const files = fileCount ?? 0
+  if (add === 0 && del === 0 && files === 0) return 'no changes'
+  return `+${add} −${del} · ${files} ${files === 1 ? 'file' : 'files'}`
+}
+
+export type SessionActionKind = 'stop' | 'review' | 'log'
+
+export interface SessionAction {
+  kind: SessionActionKind
+  label: string
+}
+
+/**
+ * The single contextual action a Home row offers, driven by status: Review a
+ * finished Session's diff, read the Log of one that stopped or errored, or Stop
+ * one still alive. A done Session whose worktree has already been reclaimed
+ * (merged / discarded) has no diff left to review, so it falls back to Log
+ * rather than offering a Review that would fail in getDiff.
+ */
+export function contextualActionFor(session: HomeSession): SessionAction {
+  const { status } = session
+  if (status === 'done') {
+    return canViewDiff(session) ? { kind: 'review', label: 'Review' } : { kind: 'log', label: 'Log' }
+  }
+  if (status === 'errored' || status === 'stopped') return { kind: 'log', label: 'Log' }
+  return { kind: 'stop', label: 'Stop' }
+}
+
+export type NeedsYouSummary =
+  | { kind: 'permission'; command: string }
+  | { kind: 'input'; text: string }
+
+/**
+ * What a "Needs you" card says about a waiting Session: the command a
+ * permission prompt wants to run (pulled out of its `Tool(command)` text), or
+ * the prose an input prompt is waiting on.
+ */
+export function describeNeedsYou(session: HomeSession): NeedsYouSummary {
+  const prompt = session.pendingPrompt
+  const firstLine = (text: string): string => text.split('\n', 1)[0]?.trim() ?? ''
+  if (prompt?.type === 'permission') {
+    const line = firstLine(prompt.text)
+    // Only treat the text as a tool call when the line is shaped like
+    // `Tool(command)` - an identifier immediately followed by parentheses.
+    // The greedy capture spans nested parens; prose that merely contains
+    // parentheses ("Allow write (see plan)?") doesn't match and falls back to
+    // showing the whole line.
+    const command = /^[A-Za-z]\w*\((.*)\)/.exec(line)?.[1]
+    return { kind: 'permission', command: command ?? line }
+  }
+  return { kind: 'input', text: session.attentionNote ?? (prompt ? firstLine(prompt.text) : '') }
+}
+
 type SummaryBucket = 'running' | 'waiting' | 'idle' | 'done' | 'errored' | 'stopped'
 
 const SUMMARY_BUCKET_ORDER: SummaryBucket[] = ['running', 'waiting', 'idle', 'done', 'errored', 'stopped']

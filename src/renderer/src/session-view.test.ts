@@ -5,15 +5,20 @@ import {
   canRequestMerge,
   canSendMessage,
   canViewDiff,
+  contextualActionFor,
   describeMergeMode,
+  describeNeedsYou,
   describeStatus,
+  formatDiffStat,
   groupSessionsByProject,
+  type HomeSession,
   isAttentionStatus,
   isMergeable,
   isStoppable,
   isTerminalStatus,
   MERGE_MODES,
   needsAttentionSessions,
+  shortMergeMode,
   summarizeStatuses
 } from './session-view'
 
@@ -215,6 +220,134 @@ describe('describeMergeMode', () => {
     for (const mode of MERGE_MODES) {
       expect(describeMergeMode(mode)).toEqual(expect.any(String))
     }
+  })
+})
+
+describe('formatDiffStat', () => {
+  it('is empty when no diff fields are present (live mode, richer fields absent)', () => {
+    expect(formatDiffStat(makeSession())).toBe('')
+  })
+
+  it('reads "no changes" when the session has touched nothing', () => {
+    expect(formatDiffStat({ ...makeSession(), additions: 0, deletions: 0, fileCount: 0 })).toBe('no changes')
+  })
+
+  it('formats additions, deletions, and a pluralized file count', () => {
+    expect(formatDiffStat({ ...makeSession(), additions: 412, deletions: 86, fileCount: 9 })).toBe(
+      '+412 −86 · 9 files'
+    )
+  })
+
+  it('uses the singular "file" for a single file', () => {
+    expect(formatDiffStat({ ...makeSession(), additions: 9, deletions: 0, fileCount: 1 })).toBe('+9 −0 · 1 file')
+  })
+
+  it('treats missing additions/deletions as zero when a file count is present', () => {
+    expect(formatDiffStat({ ...makeSession(), fileCount: 2 })).toBe('+0 −0 · 2 files')
+  })
+
+  it('does not report "no changes" when additions/deletions are present but the file count is missing', () => {
+    expect(formatDiffStat({ ...makeSession(), additions: 5, deletions: 2 })).toBe('+5 −2 · 0 files')
+  })
+})
+
+describe('shortMergeMode', () => {
+  it('abbreviates each merge mode for the group header', () => {
+    expect(shortMergeMode('manual')).toBe('manual')
+    expect(shortMergeMode('local-merge')).toBe('local')
+    expect(shortMergeMode('pull-request')).toBe('PR')
+  })
+
+  it('has a short label for every mode in MERGE_MODES', () => {
+    for (const mode of MERGE_MODES) {
+      expect(shortMergeMode(mode)).toEqual(expect.any(String))
+    }
+  })
+})
+
+describe('contextualActionFor', () => {
+  it('offers Review for a done session whose worktree is still present', () => {
+    expect(contextualActionFor(makeSession({ status: 'done' }))).toEqual({ kind: 'review', label: 'Review' })
+  })
+
+  it('falls back to Log for a done session whose worktree has been reclaimed - there is no diff left to review', () => {
+    expect(contextualActionFor(makeSession({ status: 'done', worktreeRemoved: true }))).toEqual({
+      kind: 'log',
+      label: 'Log'
+    })
+  })
+
+  it('offers Log for terminal-but-unsuccessful sessions', () => {
+    expect(contextualActionFor(makeSession({ status: 'errored' }))).toEqual({ kind: 'log', label: 'Log' })
+    expect(contextualActionFor(makeSession({ status: 'stopped' }))).toEqual({ kind: 'log', label: 'Log' })
+  })
+
+  it('offers Stop for any session whose process is still expected to be alive', () => {
+    expect(contextualActionFor(makeSession({ status: 'running' }))).toEqual({ kind: 'stop', label: 'Stop' })
+    expect(contextualActionFor(makeSession({ status: 'idle' }))).toEqual({ kind: 'stop', label: 'Stop' })
+    expect(contextualActionFor(makeSession({ status: 'waiting-on-permission' }))).toEqual({
+      kind: 'stop',
+      label: 'Stop'
+    })
+    expect(contextualActionFor(makeSession({ status: 'waiting-on-input' }))).toEqual({ kind: 'stop', label: 'Stop' })
+  })
+})
+
+describe('describeNeedsYou', () => {
+  function attentionSession(overrides: Partial<HomeSession>): HomeSession {
+    return { ...makeSession(), ...overrides }
+  }
+
+  it('extracts the command from a permission prompt', () => {
+    const session = attentionSession({
+      status: 'waiting-on-permission',
+      pendingPrompt: { type: 'permission', text: 'Bash(rm -rf out/)\n\nDo you want to proceed?' }
+    })
+    expect(describeNeedsYou(session)).toEqual({ kind: 'permission', command: 'rm -rf out/' })
+  })
+
+  it('falls back to the first line when a permission prompt has no parenthesized command', () => {
+    const session = attentionSession({
+      status: 'waiting-on-permission',
+      pendingPrompt: { type: 'permission', text: 'Proceed with the risky step?\n\ndetails' }
+    })
+    expect(describeNeedsYou(session)).toEqual({ kind: 'permission', command: 'Proceed with the risky step?' })
+  })
+
+  it('keeps nested parentheses inside a tool call', () => {
+    const session = attentionSession({
+      status: 'waiting-on-permission',
+      pendingPrompt: { type: 'permission', text: 'Bash(git commit -m "fix (typo)")' }
+    })
+    expect(describeNeedsYou(session)).toEqual({ kind: 'permission', command: 'git commit -m "fix (typo)"' })
+  })
+
+  it('does not mistake parenthetical prose for a command', () => {
+    const session = attentionSession({
+      status: 'waiting-on-permission',
+      pendingPrompt: { type: 'permission', text: 'Allow write (see plan)?' }
+    })
+    expect(describeNeedsYou(session)).toEqual({ kind: 'permission', command: 'Allow write (see plan)?' })
+  })
+
+  it('prefers the attention note for an input prompt', () => {
+    const session = attentionSession({
+      status: 'waiting-on-input',
+      pendingPrompt: { type: 'input', text: 'Which database?' },
+      attentionNote: 'Asked a question — waiting on your reply for 6m'
+    })
+    expect(describeNeedsYou(session)).toEqual({
+      kind: 'input',
+      text: 'Asked a question — waiting on your reply for 6m'
+    })
+  })
+
+  it('falls back to the prompt text for an input prompt with no attention note', () => {
+    const session = attentionSession({
+      status: 'waiting-on-input',
+      pendingPrompt: { type: 'input', text: 'Which database?' }
+    })
+    expect(describeNeedsYou(session)).toEqual({ kind: 'input', text: 'Which database?' })
   })
 })
 
