@@ -1,77 +1,298 @@
 import { useEffect, useState } from 'react'
-import type { FileDiff, Session } from '../../../../shared/ipc-contract'
+import type { MergeMode, Project, Session } from '../../../../shared/ipc-contract'
 import { describeError } from '../../describe-error'
-import { classifyDiffLine, extractDisplayLines, fileDiffAnchorId } from '../../diff-view'
-import { FileStats, FileStatusBadge } from './FileStats'
+import {
+  extractDisplayLines,
+  fileBasename,
+  groupFilesByFolder,
+  parseHunks,
+  summarizeReview,
+  type DiffRow,
+  type ReviewFileDiff
+} from '../../diff-view'
+import { describeMergeMode, describeStatus } from '../../session-view'
+import { StatusMarker } from '../StatusMarker'
 
-function scrollToId(id: string): void {
-  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+function BackButton({ onBack }: { onBack: () => void }): React.JSX.Element {
+  return (
+    <button type="button" className="btn-ghost" onClick={onBack}>
+      ← Back to sessions
+    </button>
+  )
 }
 
-const DIFF_LINE_CLASSES: Record<string, string> = {
-  hunk: 'my-1 bg-[#151514] px-[22px] py-1 text-tertiary',
+const LINE_CLASSES: Record<DiffRow['kind'], string> = {
+  hunk: 'text-tertiary',
   add: 'bg-diff-add-bg text-diff-add',
   del: 'bg-diff-del-bg text-diff-del',
-  context: 'text-secondary',
-  meta: 'text-faint italic'
+  meta: 'text-faint italic',
+  context: 'text-secondary'
 }
 
-function DiffFile({ file }: { file: FileDiff }): React.JSX.Element {
-  const lines = extractDisplayLines(file.diffText)
+/** The single signed stat a file-tree row shows - deletions win when they dominate (a mostly-removed file). */
+function dominantStat(file: ReviewFileDiff): React.JSX.Element {
+  return file.deletions > file.additions ? (
+    <span className="text-diff-del">−{file.deletions}</span>
+  ) : (
+    <span className="text-diff-add">+{file.additions}</span>
+  )
+}
+
+function FileTree({
+  files,
+  selectedPath,
+  baseRef,
+  onSelect
+}: {
+  files: ReviewFileDiff[]
+  selectedPath: string
+  baseRef: string
+  onSelect: (path: string) => void
+}): React.JSX.Element {
+  const groups = groupFilesByFolder(files)
+  const review = summarizeReview(files)
 
   return (
-    <div id={fileDiffAnchorId(file.path)} className="border-b border-border-soft">
-      <div className="sticky top-0 z-[1] flex items-center gap-3 border-b border-border-soft bg-panel-alt px-[22px] py-2.5">
-        <span className="min-w-0 flex-1 font-mono text-[11.5px] [overflow-wrap:anywhere] text-primary">{file.path}</span>
-        <span className="flex-none font-mono text-[10.5px]">
-          <FileStats file={file} />
+    <aside className="flex w-[260px] flex-none flex-col border-r border-border-soft bg-sidebar">
+      <div className="flex items-center justify-between px-4 pt-5 pb-3">
+        <span className="label-heading">Files</span>
+        <span className="font-mono text-[10px] text-faint">
+          {review.reviewed} / {review.total} reviewed
         </span>
-        <FileStatusBadge file={file} />
       </div>
-      <div className="overflow-x-auto font-mono text-[11.5px] leading-relaxed whitespace-pre">
-        {lines.length > 0 ? (
-          lines.map((line, index) => (
-            <div key={index} className={`px-[22px] ${DIFF_LINE_CLASSES[classifyDiffLine(line)]}`}>
-              {line.length > 0 ? line : ' '}
+
+      <div className="flex-1 overflow-y-auto px-3 pb-3">
+        {groups.map((group) => (
+          <div key={group.folder} className="mb-3">
+            {group.folder && <div className="px-1.5 pb-1 font-mono text-[10px] text-faint">{group.folder}</div>}
+            <div className="flex flex-col gap-px">
+              {group.files.map((file) => (
+                <button
+                  key={file.path}
+                  type="button"
+                  className={`flex w-full items-center gap-2 rounded-md px-1.5 py-[6px] text-left ${
+                    file.path === selectedPath ? 'bg-active' : 'hover:bg-hover'
+                  }`}
+                  onClick={() => onSelect(file.path)}
+                >
+                  <span className="w-2.5 flex-none text-center text-[10px] text-secondary">
+                    {file.reviewed ? '✓' : ''}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-secondary">
+                    {fileBasename(file.path)}
+                  </span>
+                  <span className="flex-none font-mono text-[9.5px] whitespace-nowrap">{dominantStat(file)}</span>
+                </button>
+              ))}
             </div>
-          ))
-        ) : (
-          <div className="px-[22px] text-faint italic">No preview available</div>
-        )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1.5 border-t border-border-faint px-4 py-3.5 font-mono text-[10px] text-faint">
+        <span>j / k · next hunk</span>
+        <span>a · mark reviewed</span>
+        <span>base @ {baseRef}</span>
+      </div>
+    </aside>
+  )
+}
+
+function DiffHeader({
+  session,
+  projectName,
+  mergeMode,
+  fileCount,
+  additions,
+  deletions,
+  onBack
+}: {
+  session: Session
+  projectName: string
+  mergeMode?: MergeMode
+  fileCount: number
+  additions: number
+  deletions: number
+  onBack: () => void
+}): React.JSX.Element {
+  const fileWord = fileCount === 1 ? 'file' : 'files'
+  return (
+    <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
+      <BackButton onBack={onBack} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2.5">
+          <span className="w-[11px] flex-none text-center text-[11px] text-primary">
+            <StatusMarker status={session.status} />
+          </span>
+          <span className="truncate font-mono text-[14px] leading-none text-primary">
+            {projectName}/{session.branch}
+          </span>
+          <span className="flex-none rounded border border-border-medium px-[7px] py-[3px] text-[9px] leading-none font-medium tracking-[0.09em] text-secondary uppercase">
+            {describeStatus(session.status)}
+          </span>
+        </div>
+        <div className="mt-2 truncate font-mono text-[10.5px] leading-none text-faint">
+          +{additions} −{deletions} · {fileCount} {fileWord}
+          {mergeMode && ` · merge mode: ${describeMergeMode(mergeMode).toLowerCase()}`}
+        </div>
+      </div>
+      {/* Both header actions are inert for now (ticket #52). */}
+      <button type="button" className="btn-ghost px-[15px] py-2 text-[11.5px]">
+        Discard worktree
+      </button>
+      <button type="button" className="btn px-[15px] py-2 text-[11.5px]">
+        Open pull request
+      </button>
+    </div>
+  )
+}
+
+function ViewControls(): React.JSX.Element {
+  // Unified/Split/Whitespace are inert for now (ticket #52).
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex overflow-hidden rounded-md border border-border-medium">
+        <span className="bg-active px-2.5 py-[5px] text-[10.5px] text-primary">Unified</span>
+        <span className="px-2.5 py-[5px] text-[10.5px] text-faint">Split</span>
+      </div>
+      <button type="button" className="rounded-md border border-border-medium px-2.5 py-[5px] text-[10.5px] text-secondary hover:border-white/50 hover:text-primary">
+        Whitespace
+      </button>
+    </div>
+  )
+}
+
+function FileBar({ file }: { file: ReviewFileDiff }): React.JSX.Element {
+  const total = Math.max(1, file.additions + file.deletions)
+  return (
+    <div className="flex items-center gap-4 border-b border-border-soft px-6 py-3">
+      <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-primary">{file.path}</span>
+      <span className="flex-none font-mono text-[10.5px]">
+        <span className="text-diff-add">+{file.additions}</span> <span className="text-diff-del">−{file.deletions}</span>
+      </span>
+      <span className="flex h-[6px] w-[64px] flex-none overflow-hidden rounded-full bg-white/10">
+        <span className="bg-diff-add" style={{ width: `${(file.additions / total) * 100}%` }} />
+        <span className="bg-diff-del" style={{ width: `${(file.deletions / total) * 100}%` }} />
+      </span>
+      <ViewControls />
+    </div>
+  )
+}
+
+function DiffLineRow({ row }: { row: DiffRow }): React.JSX.Element {
+  const line = row.newLine ?? row.oldLine
+  const sign = row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ' '
+  const content = row.kind === 'add' || row.kind === 'del' ? row.text.slice(1) : row.text.replace(/^ /, '')
+  return (
+    <div className={`flex ${LINE_CLASSES[row.kind]}`}>
+      <span className="w-[52px] flex-none py-[1px] pr-3 text-right text-faint select-none">{line ?? ''}</span>
+      <span className="w-[16px] flex-none py-[1px] text-center select-none">{sign}</span>
+      <span className="flex-1 py-[1px] pr-6">{content.length > 0 ? content : ' '}</span>
+    </div>
+  )
+}
+
+function HunkView({ file }: { file: ReviewFileDiff }): React.JSX.Element {
+  const hunks = parseHunks(file.diffText)
+
+  if (hunks.length === 0) {
+    // Binary file / pure rename - no line-numbered hunks to render.
+    return (
+      <div className="overflow-x-auto px-6 py-4 font-mono text-[11.5px] whitespace-pre text-faint italic">
+        {extractDisplayLines(file.diffText).join('\n') || 'No preview available'}
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-x-auto font-mono text-[11.5px] leading-relaxed">
+      {hunks.map((hunk, index) => (
+        <div key={index}>
+          <div className="flex items-center justify-between bg-[#151514] px-6 py-1">
+            <span className="text-tertiary">{hunk.header}</span>
+            <span className="pr-2 text-[10px] text-faint">
+              hunk {index + 1} of {hunks.length}
+            </span>
+          </div>
+          <div className="px-6">
+            {hunk.rows.map((row, rowIndex) => (
+              <DiffLineRow key={rowIndex} row={row} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DiffFooter({
+  fileIndex,
+  fileCount,
+  onNextFile
+}: {
+  fileIndex: number
+  fileCount: number
+  onNextFile: () => void
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-between border-t border-border-soft px-6 py-3">
+      <span className="font-mono text-[11px] text-faint">
+        file {fileIndex + 1} of {fileCount}
+      </span>
+      <div className="flex items-center gap-2">
+        {/* Mark reviewed is inert for now (ticket #52). */}
+        <button type="button" className="btn-ghost px-[15px] py-2 text-[11.5px]">
+          Mark reviewed
+        </button>
+        <button type="button" className="btn px-[15px] py-2 text-[11.5px]" onClick={onNextFile}>
+          Next file →
+        </button>
       </div>
     </div>
   )
 }
 
-function totalStats(files: FileDiff[]): string {
-  const additions = files.reduce((sum, file) => sum + file.additions, 0)
-  const deletions = files.reduce((sum, file) => sum + file.deletions, 0)
-  const fileWord = files.length === 1 ? 'file' : 'files'
-  return `+${additions} −${deletions} · ${files.length} ${fileWord}`
+function DiffShell({ onBack, children }: { onBack: () => void; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div id="diff-screen" className="flex h-screen w-full">
+      <main id="diff-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
+          <BackButton onBack={onBack} />
+        </div>
+        <div className="px-6 py-10 text-[12.5px] leading-relaxed text-faint">{children}</div>
+      </main>
+    </div>
+  )
 }
 
 export function DiffScreen({
   sessionId,
   sessions,
+  projects,
   onBack
 }: {
   sessionId: string
   sessions: Session[]
+  projects: Project[]
   onBack: () => void
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId)
-  const [files, setFiles] = useState<FileDiff[] | null>(null)
+  const [files, setFiles] = useState<ReviewFileDiff[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setFiles(null)
     setLoadError(null)
+    setSelectedPath(null)
 
+    // getDiff rides the per-file `reviewed` flag along in mock mode; live mode
+    // omits it and the tree degrades to "nothing reviewed yet".
     window.orca
       .getDiff(sessionId)
       .then((nextFiles) => {
-        if (!cancelled) setFiles(nextFiles)
+        if (!cancelled) setFiles(nextFiles as ReviewFileDiff[])
       })
       .catch((error: unknown) => {
         if (!cancelled) setLoadError(describeError(error))
@@ -80,95 +301,52 @@ export function DiffScreen({
     return () => {
       cancelled = true
     }
-    // Only depends on sessionId, not the `session` object it's looked up from -
-    // `sessions` gets a new array (and session objects new identities) on every
-    // 2s status poll tick, and re-shelling to `git diff` on every tick would be
-    // wasteful. This only re-fetches on a fresh navigation to a session.
+    // Only depends on sessionId, not the `session` object - `sessions` gets new
+    // identities on every 2s poll tick and re-shelling to `git diff` per tick
+    // would be wasteful. Re-fetches only on a fresh navigation.
   }, [sessionId])
 
-  const backButton = (
-    <button type="button" className="btn-ghost" onClick={onBack}>
-      ← Back to sessions
-    </button>
+  if (!session) return <DiffShell onBack={onBack}>Failed to load diff: Unknown session: {sessionId}</DiffShell>
+  if (loadError) return <DiffShell onBack={onBack}>Failed to load diff: {loadError}</DiffShell>
+  if (files === null) return <DiffShell onBack={onBack}>Loading diff…</DiffShell>
+  if (files.length === 0) return <DiffShell onBack={onBack}>This session hasn&apos;t changed anything yet.</DiffShell>
+
+  const selectedIndex = Math.max(
+    0,
+    files.findIndex((file) => file.path === selectedPath)
   )
-
-  if (!session) {
-    return (
-      <div id="diff-screen" className="flex h-screen w-full">
-        <main id="diff-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">{backButton}</div>
-          <div className="px-6 py-10 text-[12.5px] leading-relaxed text-faint">
-            Failed to load diff: Unknown session: {sessionId}
-          </div>
-        </main>
-      </div>
-    )
-  }
-
-  if (loadError) {
-    return (
-      <div id="diff-screen" className="flex h-screen w-full">
-        <main id="diff-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">{backButton}</div>
-          <div className="px-6 py-10 text-[12.5px] leading-relaxed text-faint">Failed to load diff: {loadError}</div>
-        </main>
-      </div>
-    )
-  }
-
-  if (files === null) {
-    return (
-      <div id="diff-screen" className="flex h-screen w-full">
-        <main id="diff-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="px-6 py-10 text-[12.5px] leading-relaxed text-faint">Loading diff…</div>
-        </main>
-      </div>
-    )
-  }
+  const selected = files[selectedIndex]
+  const project = projects.find((candidate) => candidate.id === session.projectId)
+  const additions = files.reduce((sum, file) => sum + file.additions, 0)
+  const deletions = files.reduce((sum, file) => sum + file.deletions, 0)
 
   return (
     <div id="diff-screen" className="flex h-screen w-full">
-      <aside className="w-[260px] flex-none overflow-y-auto border-r border-border-soft bg-sidebar px-3 py-5">
-        <div className="label-heading px-1.5 pb-2">Files</div>
-        <div className="flex flex-col gap-px">
-          {files.map((file) => (
-            <button
-              key={file.path}
-              type="button"
-              className="flex w-full items-center justify-between gap-2.5 rounded-md px-1.5 py-[7px] text-left hover:bg-hover"
-              onClick={() => scrollToId(fileDiffAnchorId(file.path))}
-            >
-              <span className="min-w-0 flex-1 font-mono text-[11px] leading-tight [overflow-wrap:anywhere] text-secondary">
-                {file.path}
-              </span>
-              <span className="flex-none font-mono text-[9.5px] whitespace-nowrap">
-                <FileStats file={file} />
-              </span>
-            </button>
-          ))}
+      <FileTree
+        files={files}
+        selectedPath={selected.path}
+        baseRef={session.baseRef}
+        onSelect={setSelectedPath}
+      />
+      <main id="diff-main" className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <DiffHeader
+          session={session}
+          projectName={project?.name ?? session.projectId}
+          mergeMode={project?.mergeMode}
+          fileCount={files.length}
+          additions={additions}
+          deletions={deletions}
+          onBack={onBack}
+        />
+        <FileBar file={selected} />
+        <div className="flex-1 overflow-y-auto">
+          <HunkView file={selected} />
         </div>
-      </aside>
-
-      <main id="diff-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
-          {backButton}
-          <div>
-            <div className="font-mono text-[14px] leading-[1.1] text-primary">{session.branch}</div>
-            <div className="mt-1.5 font-mono text-[10.5px] text-faint">
-              {files.length === 0 ? 'No changes yet' : totalStats(files)}
-            </div>
-          </div>
-        </div>
-
-        <div className="pb-6">
-          {files.length > 0 ? (
-            files.map((file) => <DiffFile key={file.path} file={file} />)
-          ) : (
-            <div className="px-6 py-10 text-[12.5px] leading-relaxed text-faint">
-              This session hasn&apos;t changed anything yet.
-            </div>
-          )}
-        </div>
+        <DiffFooter
+          fileIndex={selectedIndex}
+          fileCount={files.length}
+          onNextFile={() => setSelectedPath(files[(selectedIndex + 1) % files.length].path)}
+        />
       </main>
     </div>
   )

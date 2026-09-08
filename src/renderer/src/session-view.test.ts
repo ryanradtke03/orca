@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { Project, Session } from '../../shared/ipc-contract'
 import {
+  bucketSessionsForNav,
   canDiscardWorktree,
   canRequestMerge,
   canSendMessage,
   canViewDiff,
   contextualActionFor,
   describeMergeMode,
+  describeNavDetail,
   describeNeedsYou,
   describeStatus,
+  describeStatusPhrase,
+  type DetailSession,
   formatDiffStat,
+  formatTokenUsage,
   groupSessionsByProject,
   type HomeSession,
   isAttentionStatus,
@@ -19,8 +24,10 @@ import {
   MERGE_MODES,
   needsAttentionSessions,
   shortMergeMode,
+  summarizeFilesTouched,
   summarizeStatuses
 } from './session-view'
+import type { FileDiff } from '../../shared/ipc-contract'
 
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
@@ -33,6 +40,10 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     status: 'running',
     ...overrides
   }
+}
+
+function makeDetail(overrides: Partial<DetailSession> = {}): DetailSession {
+  return { ...makeSession(), ...overrides }
 }
 
 describe('describeStatus', () => {
@@ -365,5 +376,142 @@ describe('needsAttentionSessions', () => {
 
   it('returns an empty array when nothing needs attention', () => {
     expect(needsAttentionSessions([makeSession()])).toEqual([])
+  })
+})
+
+describe('describeStatusPhrase', () => {
+  it('gives a lowercase natural phrase for the header', () => {
+    expect(describeStatusPhrase('waiting-on-permission')).toBe('waiting on permission')
+    expect(describeStatusPhrase('waiting-on-input')).toBe('waiting on input')
+    expect(describeStatusPhrase('running')).toBe('running')
+    expect(describeStatusPhrase('done')).toBe('done')
+  })
+})
+
+describe('formatTokenUsage', () => {
+  it('compacts a used/limit pair to k figures', () => {
+    expect(formatTokenUsage(128_000, 200_000)).toBe('128k / 200k')
+  })
+
+  it('leaves counts under 1000 as-is', () => {
+    expect(formatTokenUsage(512, 200_000)).toBe('512 / 200k')
+  })
+
+  it('is empty when either figure is unknown (live mode)', () => {
+    expect(formatTokenUsage(undefined, 200_000)).toBe('')
+    expect(formatTokenUsage(128_000, undefined)).toBe('')
+    expect(formatTokenUsage()).toBe('')
+  })
+})
+
+describe('bucketSessionsForNav', () => {
+  const permission = makeDetail({
+    id: 'perm',
+    projectId: 'proj-a',
+    status: 'waiting-on-permission',
+    pendingPrompt: { type: 'permission', text: 'Bash(x)' }
+  })
+  const inputOther = makeDetail({
+    id: 'input',
+    projectId: 'proj-b',
+    status: 'waiting-on-input',
+    pendingPrompt: { type: 'input', text: 'which?' }
+  })
+  const running = makeDetail({ id: 'run', projectId: 'proj-a', status: 'running' })
+  const idle = makeDetail({ id: 'idle', projectId: 'proj-a', status: 'idle' })
+  const otherActive = makeDetail({ id: 'other', projectId: 'proj-b', status: 'running' })
+  const done = makeDetail({ id: 'done', projectId: 'proj-a', status: 'done' })
+
+  const all = [inputOther, permission, running, idle, otherActive, done]
+  const buckets = bucketSessionsForNav(all, 'proj-a')
+
+  it('collects everything waiting across projects, current project first', () => {
+    expect(buckets.needsYou.map((session) => session.id)).toEqual(['perm', 'input'])
+  })
+
+  it('scopes active to the current project and excludes waiting/terminal sessions', () => {
+    expect(buckets.active.map((session) => session.id)).toEqual(['run', 'idle'])
+  })
+
+  it('scopes recent to the current project’s terminal sessions', () => {
+    expect(buckets.recent.map((session) => session.id)).toEqual(['done'])
+  })
+})
+
+describe('describeNavDetail', () => {
+  const projectName = (): string => 'atlas-api'
+
+  it('shows the prompt type and activity for a waiting session in the current project', () => {
+    const session = makeDetail({
+      projectId: 'proj-a',
+      status: 'waiting-on-permission',
+      pendingPrompt: { type: 'permission', text: 'Bash(x)' },
+      activityLabel: '1m'
+    })
+    expect(describeNavDetail(session, 'proj-a', projectName())).toBe('permission · 1m')
+  })
+
+  it('appends the project name for a session in another project', () => {
+    const session = makeDetail({
+      projectId: 'proj-b',
+      status: 'waiting-on-input',
+      pendingPrompt: { type: 'input', text: 'which?' },
+      activityLabel: '6m'
+    })
+    expect(describeNavDetail(session, 'proj-a', 'atlas-api')).toBe('input · 6m · atlas-api')
+  })
+
+  it('shows status and activity for an active session', () => {
+    const session = makeDetail({ projectId: 'proj-a', status: 'running', activityLabel: '2m' })
+    expect(describeNavDetail(session, 'proj-a', projectName())).toBe('running · 2m')
+  })
+
+  it('shows the diff stat for a finished session', () => {
+    const session = makeDetail({
+      projectId: 'proj-a',
+      status: 'done',
+      additions: 126,
+      deletions: 301
+    })
+    expect(describeNavDetail(session, 'proj-a', projectName())).toBe('done · +126 −301')
+  })
+
+  it('falls back to the bare status when a finished session has no diff stat', () => {
+    const session = makeDetail({ projectId: 'proj-a', status: 'stopped' })
+    expect(describeNavDetail(session, 'proj-a', projectName())).toBe('stopped')
+  })
+})
+
+describe('summarizeFilesTouched', () => {
+  const file = (path: string, additions: number, deletions: number): FileDiff => ({
+    path,
+    status: 'modified',
+    additions,
+    deletions,
+    diffText: ''
+  })
+
+  it('uses the Session totals for the header and collapses files beyond the diff sample', () => {
+    const files = [file('a.ts', 64, 9), file('b.ts', 11, 2), file('c.ts', 188, 3)]
+    const summary = summarizeFilesTouched(files, { additions: 412, deletions: 86, fileCount: 9 })
+    expect(summary.totalAdditions).toBe(412)
+    expect(summary.totalDeletions).toBe(86)
+    expect(summary.rows.map((row) => row.path)).toEqual(['a.ts', 'b.ts', 'c.ts'])
+    expect(summary.moreCount).toBe(6)
+    expect(summary.moreAdditions).toBe(149)
+    expect(summary.hasChanges).toBe(true)
+  })
+
+  it('falls back to summing the diff when Session totals are absent (live mode)', () => {
+    const files = [file('a.ts', 3, 1), file('b.ts', 5, 2)]
+    const summary = summarizeFilesTouched(files, {})
+    expect(summary.totalAdditions).toBe(8)
+    expect(summary.totalDeletions).toBe(3)
+    expect(summary.moreCount).toBe(0)
+    expect(summary.rows).toHaveLength(2)
+  })
+
+  it('reports no changes for an empty diff with no totals', () => {
+    expect(summarizeFilesTouched([], {}).hasChanges).toBe(false)
   })
 })

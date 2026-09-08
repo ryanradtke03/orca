@@ -1,4 +1,6 @@
-import type { FileDiff, Session, TranscriptMessage } from '../../../shared/ipc-contract'
+import type { FileDiff, Session } from '../../../shared/ipc-contract'
+import type { PlanStep, QueuedPrompt } from '../session-view'
+import type { TranscriptEntry } from '../transcript-view'
 
 /**
  * Renderer-local placeholder types (ticket #49).
@@ -8,25 +10,21 @@ import type { FileDiff, Session, TranscriptMessage } from '../../../shared/ipc-c
  * transcript tool calls and in-thread permission cards, per-file review
  * progress, and per-Session model/token/turn metadata.
  *
- * They live here, never in src/shared/ipc-contract.ts, and every added field
- * is optional so live (real-IPC) mode keeps compiling and rendering -
- * degraded, never broken - until the four screen tickets fold these fields
- * into the expanded screens. When the contract grows to cover a field for
- * real, delete it here.
+ * The presentational shapes themselves now live with the screens that render
+ * them (session-view / transcript-view) - #51 folded them out of here as it
+ * built the session screen. This module keeps the mock-only compositions
+ * (fixtures, ride-along Session/FileDiff) and re-exports the shared ones so the
+ * fixtures keep a single import site. Every added field stays optional so live
+ * (real-IPC) mode keeps compiling and rendering - degraded, never broken.
  */
 
-export type PlanStepState = 'done' | 'active' | 'pending'
-
-export interface PlanStep {
-  text: string
-  state: PlanStepState
-}
-
-export interface QueuedPrompt {
-  text: string
-  /** The dashed sub-line the inspector shows, e.g. "sends after approval". */
-  note?: string
-}
+export type { PlanStep, PlanStepState, QueuedPrompt } from '../session-view'
+export type {
+  MessageEntry,
+  PermissionCardEntry,
+  ToolCallEntry,
+  ToolCallState
+} from '../transcript-view'
 
 /** Per-file review progress the diff mockup tracks - distinct from git's FileDiffStatus. */
 export interface FileReviewMeta {
@@ -47,37 +45,14 @@ export interface SessionMeta {
   fileCount?: number
   plan?: PlanStep[]
   queuedPrompts?: QueuedPrompt[]
+  /** The full transcript (incl. tool calls and the permission card) the session screen renders. */
+  transcript?: MockTranscriptEntry[]
   /** Free-text note the "Needs you" block shows, e.g. "waiting on your reply for 6m". */
   attentionNote?: string
+  /** Short relative-activity label the session nav shows, e.g. "1m" or "31m". */
+  activityLabel?: string
 }
 
 export type MockSession = Session & SessionMeta
 
-export type ToolCallState = 'ok' | 'blocked' | 'running'
-
-/** A tool call rendered inline in the transcript, e.g. Edit(...) or Bash(...). */
-export interface ToolCallEntry {
-  kind: 'tool-call'
-  id: string
-  label: string
-  state: ToolCallState
-  additions?: number
-  deletions?: number
-}
-
-/** An in-thread permission card - answered inline in the transcript, not in a modal. */
-export interface PermissionCardEntry {
-  kind: 'permission-card'
-  id: string
-  command: string
-  detail: string
-  /** e.g. "waiting 1m 12s". */
-  waitingFor?: string
-}
-
-export interface MessageEntry {
-  kind: 'message'
-  message: TranscriptMessage
-}
-
-export type MockTranscriptEntry = MessageEntry | ToolCallEntry | PermissionCardEntry
+export type MockTranscriptEntry = TranscriptEntry

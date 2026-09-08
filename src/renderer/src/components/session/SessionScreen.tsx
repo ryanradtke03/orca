@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FileDiff, Session, TranscriptMessage } from '../../../../shared/ipc-contract'
+import type { FileDiff, Project, Session, TranscriptMessage } from '../../../../shared/ipc-contract'
 import { describeError } from '../../describe-error'
-import { canDiscardWorktree, canRequestMerge, describeStatus, isStoppable } from '../../session-view'
+import { canViewDiff, describeStatusPhrase, type DetailSession } from '../../session-view'
+import { messagesToEntries, type TranscriptEntry } from '../../transcript-view'
 import { ChatPane } from './ChatPane'
+import { Composer } from './Composer'
 import { Inspector } from './Inspector'
+import { SessionNav } from './SessionNav'
 
 const TRANSCRIPT_POLL_INTERVAL_MS = 2000
 
@@ -15,34 +18,54 @@ function BackButton({ onBack }: { onBack: () => void }): React.JSX.Element {
   )
 }
 
-function HeaderActions({
+function SessionHeader({
   session,
-  onStop,
-  onRequestMerge,
-  onDiscardWorktree
+  projectName,
+  onBack,
+  onViewDiff
 }: {
-  session: Session
-  onStop: () => void
-  onRequestMerge: () => void
-  onDiscardWorktree: () => void
+  session: DetailSession
+  projectName: string
+  onBack: () => void
+  onViewDiff: () => void
 }): React.JSX.Element {
   return (
-    <div className="flex gap-2">
-      {isStoppable(session.status) && (
-        <button type="button" className="btn-ghost px-[15px] py-2 text-[11.5px]" onClick={onStop}>
-          Stop
+    <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
+      <BackButton onBack={onBack} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2.5">
+          <span className="h-[7px] w-[7px] flex-none rotate-45 bg-accent" />
+          <span className="truncate font-mono text-[14px] leading-none text-primary">
+            {projectName}/{session.branch}
+          </span>
+        </div>
+        <div className="mt-2 truncate font-mono text-[10.5px] leading-none text-faint">
+          {describeStatusPhrase(session.status)} · branch {session.branch} · base @ {session.baseRef}
+        </div>
+      </div>
+      {canViewDiff(session) && (
+        <button type="button" className="btn-ghost px-[15px] py-2 text-[11.5px]" onClick={onViewDiff}>
+          View diff
         </button>
       )}
-      {canRequestMerge(session) && (
-        <button type="button" className="btn px-[15px] py-2 text-[11.5px]" onClick={onRequestMerge}>
-          Request merge
-        </button>
-      )}
-      {canDiscardWorktree(session) && (
-        <button type="button" className="btn-ghost px-[15px] py-2 text-[11.5px]" onClick={onDiscardWorktree}>
-          Discard
-        </button>
-      )}
+      {/* Stop is inert for now (ticket #51) - wiring session actions is a later ticket. */}
+      <button type="button" className="btn px-[15px] py-2 text-[11.5px]">
+        Stop
+      </button>
+    </div>
+  )
+}
+
+/** A minimal frame for the not-found / loading / error states, so they still carry a way back. */
+function SessionShell({ onBack, children }: { onBack: () => void; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div id="session-screen" className="flex h-screen w-full">
+      <main id="session-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
+          <BackButton onBack={onBack} />
+        </div>
+        <div className="py-10 pl-6 text-[12.5px] leading-relaxed text-faint">{children}</div>
+      </main>
     </div>
   )
 }
@@ -50,24 +73,22 @@ function HeaderActions({
 export function SessionScreen({
   sessionId,
   sessions,
+  projects,
   onBack,
-  onStop,
-  onRespond,
-  onRequestMerge,
-  onDiscardWorktree
+  onOpenSession,
+  onOpenDiff
 }: {
   sessionId: string
   sessions: Session[]
+  projects: Project[]
   onBack: () => void
-  onStop: (sessionId: string) => void
-  onRespond: (sessionId: string, response: string) => Promise<void>
-  onRequestMerge: (sessionId: string) => void
-  onDiscardWorktree: (sessionId: string) => void
+  onOpenSession: (sessionId: string) => void
+  onOpenDiff: (sessionId: string) => void
 }): React.JSX.Element {
-  const session = sessions.find((candidate) => candidate.id === sessionId)
+  const session = sessions.find((candidate) => candidate.id === sessionId) as DetailSession | undefined
 
   const [files, setFiles] = useState<FileDiff[] | null>(null)
-  const [transcript, setTranscript] = useState<TranscriptMessage[]>([])
+  const [messages, setMessages] = useState<TranscriptMessage[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // Loads once per sessionId - re-fetching a `git diff` on every 2s status
@@ -76,14 +97,14 @@ export function SessionScreen({
   useEffect(() => {
     let cancelled = false
     setFiles(null)
-    setTranscript([])
+    setMessages([])
     setLoadError(null)
 
     Promise.all([window.orca.getDiff(sessionId), window.orca.getTranscript(sessionId)])
-      .then(([nextFiles, nextTranscript]) => {
+      .then(([nextFiles, nextMessages]) => {
         if (cancelled) return
         setFiles(nextFiles)
-        setTranscript(nextTranscript)
+        setMessages(nextMessages)
       })
       .catch((error: unknown) => {
         if (cancelled) return
@@ -95,13 +116,13 @@ export function SessionScreen({
     }
   }, [sessionId])
 
-  // The transcript live-updates on a 2s cadence independent of the diff
-  // (#45) - `inFlight` guards against a fetch slower than the interval
-  // overlapping with the next tick's, and `cancelled` drops a response that
-  // resolves after the user has navigated away from (or to a different)
-  // session. A transient poll failure only logs - it doesn't touch
-  // `loadError`, which is reserved for the initial load, so one flaky tick
-  // doesn't blank an otherwise-working session view.
+  // The plain transcript live-updates on a 2s cadence independent of the diff
+  // (#45). It's the live-mode fallback: in mock mode the richer transcript
+  // (tool calls + permission card) rides along on the session itself and is
+  // preferred below. `inFlight` guards a slow fetch overlapping the next tick;
+  // `cancelled` drops a response that resolves after navigating away. A
+  // transient poll failure only logs - it doesn't touch `loadError`, which is
+  // reserved for the initial load.
   const inFlight = useRef(false)
   useEffect(() => {
     if (files === null) return
@@ -112,8 +133,8 @@ export function SessionScreen({
       inFlight.current = true
       window.orca
         .getTranscript(sessionId)
-        .then((nextTranscript) => {
-          if (!cancelled) setTranscript(nextTranscript)
+        .then((nextMessages) => {
+          if (!cancelled) setMessages(nextMessages)
         })
         .catch((error: unknown) => {
           if (!cancelled) console.error(`Failed to refresh transcript for ${sessionId}:`, error)
@@ -130,62 +151,45 @@ export function SessionScreen({
   }, [sessionId, files])
 
   if (!session) {
-    return (
-      <div id="session-screen" className="flex h-screen w-full">
-        <main id="session-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
-            <BackButton onBack={onBack} />
-          </div>
-          <div className="py-10 text-[12.5px] leading-relaxed text-faint">Failed to load session: Unknown session: {sessionId}</div>
-        </main>
-      </div>
-    )
+    return <SessionShell onBack={onBack}>Failed to load session: Unknown session: {sessionId}</SessionShell>
   }
-
   if (loadError) {
-    return (
-      <div id="session-screen" className="flex h-screen w-full">
-        <main id="session-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
-            <BackButton onBack={onBack} />
-          </div>
-          <div className="py-10 text-[12.5px] leading-relaxed text-faint">Failed to load session: {loadError}</div>
-        </main>
-      </div>
-    )
+    return <SessionShell onBack={onBack}>Failed to load session: {loadError}</SessionShell>
+  }
+  if (files === null) {
+    return <SessionShell onBack={onBack}>Loading session…</SessionShell>
   }
 
-  if (files === null) {
-    return (
-      <div id="session-screen" className="flex h-screen w-full">
-        <main id="session-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="py-10 text-[12.5px] leading-relaxed text-faint">Loading session…</div>
-        </main>
-      </div>
-    )
-  }
+  const project = projects.find((candidate) => candidate.id === session.projectId)
+  const projectName = project?.name ?? session.projectId
+  const projectNameFor = (projectId: string): string =>
+    projects.find((candidate) => candidate.id === projectId)?.name ?? projectId
+
+  // Prefer the rich transcript that rode along on the session (mock mode); fall
+  // back to the plain polled messages (live mode).
+  const entries: TranscriptEntry[] = session.transcript ?? messagesToEntries(messages)
 
   return (
     <div id="session-screen" className="flex h-screen w-full">
-      <main id="session-main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
-          <BackButton onBack={onBack} />
-          <div className="min-w-0 flex-1">
-            <div className="font-mono text-[14px] leading-[1.1] text-primary">{session.branch}</div>
-            <div className="mt-1.5 text-[9.5px] leading-none font-medium tracking-[0.09em] text-faint uppercase">
-              {describeStatus(session.status)}
-            </div>
-          </div>
-          <HeaderActions
-            session={session}
-            onStop={() => onStop(session.id)}
-            onRequestMerge={() => onRequestMerge(session.id)}
-            onDiscardWorktree={() => onDiscardWorktree(session.id)}
-          />
-        </div>
-        <ChatPane session={session} transcript={transcript} onRespond={(response) => onRespond(session.id, response)} />
+      <SessionNav
+        sessions={sessions as DetailSession[]}
+        currentProjectId={session.projectId}
+        currentProjectName={projectName}
+        currentSessionId={session.id}
+        projectNameFor={projectNameFor}
+        onOpenSession={onOpenSession}
+      />
+      <main id="session-main" className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <SessionHeader
+          session={session}
+          projectName={projectName}
+          onBack={onBack}
+          onViewDiff={() => onOpenDiff(session.id)}
+        />
+        <ChatPane entries={entries} />
+        <Composer queuedCount={session.queuedPrompts?.length ?? 0} />
       </main>
-      <Inspector session={session} files={files} />
+      <Inspector session={session} files={files} mergeMode={project?.mergeMode} />
     </div>
   )
 }

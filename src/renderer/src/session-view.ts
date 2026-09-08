@@ -1,4 +1,5 @@
-import type { MergeMode, Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import type { FileDiff, MergeMode, Project, Session, SessionStatus } from '../../shared/ipc-contract'
+import type { TranscriptEntry } from './transcript-view'
 
 const STATUS_LABELS: Record<SessionStatus, string> = {
   running: 'Running',
@@ -12,6 +13,21 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 
 export function describeStatus(status: SessionStatus): string {
   return STATUS_LABELS[status]
+}
+
+const STATUS_PHRASES: Record<SessionStatus, string> = {
+  running: 'running',
+  'waiting-on-permission': 'waiting on permission',
+  'waiting-on-input': 'waiting on input',
+  idle: 'idle',
+  done: 'done',
+  errored: 'errored',
+  stopped: 'stopped'
+}
+
+/** The lowercase natural phrase the session header shows, e.g. "waiting on permission". */
+export function describeStatusPhrase(status: SessionStatus): string {
+  return STATUS_PHRASES[status]
 }
 
 export const STOPPABLE_STATUSES: ReadonlySet<SessionStatus> = new Set([
@@ -107,6 +123,41 @@ export interface SessionDisplay {
 
 /** A Session as the Home screen renders it - the contract shape plus the optional display fields above. */
 export type HomeSession = Session & SessionDisplay
+
+export type PlanStepState = 'done' | 'active' | 'pending'
+
+export interface PlanStep {
+  text: string
+  state: PlanStepState
+}
+
+export interface QueuedPrompt {
+  text: string
+  /** The dashed sub-line the inspector shows, e.g. "sends after approval". */
+  note?: string
+}
+
+/**
+ * The richer per-Session fields the session screen (05b) shows on top of the
+ * Home ones: model/token/turn metadata, the plan checklist, queued prompts,
+ * the full transcript (incl. tool calls and the permission card), and a short
+ * relative-activity label for the nav. Every one is optional so a live-mode
+ * (real-IPC) Session renders degraded, never broken.
+ */
+export interface SessionDetail extends SessionDisplay {
+  model?: string
+  tokensUsed?: number
+  tokenLimit?: number
+  turns?: number
+  plan?: PlanStep[]
+  queuedPrompts?: QueuedPrompt[]
+  transcript?: TranscriptEntry[]
+  /** Short relative-activity label the session nav shows, e.g. "1m" or "31m". */
+  activityLabel?: string
+}
+
+/** A Session as the session screen renders it - the contract shape plus the optional detail fields above. */
+export type DetailSession = Session & SessionDetail
 
 /**
  * The right-hand diff-stat column on a Home row, e.g. "+412 −86 · 9 files".
@@ -206,4 +257,122 @@ export function groupSessionsByProject(projects: Project[], sessions: Session[])
 
 export function needsAttentionSessions(sessions: Session[]): Session[] {
   return sessions.filter((session) => session.pendingPrompt !== undefined)
+}
+
+// --- Session screen (05b) helpers ------------------------------------------
+
+export interface NavBuckets {
+  /** Anything paused on a prompt, across every project (triage first) - current project's own listed ahead of others. */
+  needsYou: DetailSession[]
+  /** The current project's live, unblocked sessions (running / idle). */
+  active: DetailSession[]
+  /** The current project's finished sessions (done / errored / stopped). */
+  recent: DetailSession[]
+}
+
+/**
+ * Splits sessions into the session nav's three groups relative to the open
+ * session's project. "Needs you" spans all projects so nothing waiting is
+ * hidden; the other two are scoped to the current project. Needs-you keeps
+ * the current project's sessions ahead of other projects', but is otherwise
+ * stable in the given order.
+ */
+export function bucketSessionsForNav(sessions: DetailSession[], currentProjectId: string): NavBuckets {
+  const needsYou = sessions
+    .filter((session) => session.pendingPrompt !== undefined)
+    .sort((a, b) => Number(b.projectId === currentProjectId) - Number(a.projectId === currentProjectId))
+  const active = sessions.filter(
+    (session) =>
+      session.projectId === currentProjectId &&
+      session.pendingPrompt === undefined &&
+      !isTerminalStatus(session.status)
+  )
+  const recent = sessions.filter(
+    (session) => session.projectId === currentProjectId && isTerminalStatus(session.status)
+  )
+  return { needsYou, active, recent }
+}
+
+/**
+ * The sub-line a session nav row shows under its name. A waiting or active
+ * session shows its state and (if known) how long it's been there; a finished
+ * one shows its diff stat instead. A nav row for a session in another project
+ * than the open one gets that project's name appended.
+ */
+export function describeNavDetail(session: DetailSession, currentProjectId: string, projectName: string): string {
+  const word = session.pendingPrompt?.type ?? session.status
+  if (isTerminalStatus(session.status)) {
+    const stat = formatNavDiff(session)
+    return stat ? `${word} · ${stat}` : word
+  }
+  const age = session.activityLabel ? ` · ${session.activityLabel}` : ''
+  const project = session.projectId === currentProjectId ? '' : ` · ${projectName}`
+  return `${word}${age}${project}`
+}
+
+function formatNavDiff({ additions, deletions }: SessionDisplay): string {
+  if (additions === undefined && deletions === undefined) return ''
+  return `+${additions ?? 0} −${deletions ?? 0}`
+}
+
+/** Compacts a token count to a "k" figure, e.g. 128000 -> "128k"; counts under 1000 stay as-is. */
+function compactTokens(count: number): string {
+  return count >= 1000 ? `${Math.round(count / 1000)}k` : `${count}`
+}
+
+/**
+ * The inspector's token line, e.g. "128k / 200k". Empty when neither figure is
+ * known (live mode), so the row can be hidden rather than showing "? / ?".
+ */
+export function formatTokenUsage(used?: number, limit?: number): string {
+  if (used === undefined || limit === undefined) return ''
+  return `${compactTokens(used)} / ${compactTokens(limit)}`
+}
+
+export interface FilesTouchedRow {
+  path: string
+  additions: number
+}
+
+export interface FilesTouchedSummary {
+  totalAdditions: number
+  totalDeletions: number
+  /** The first few files, shown individually. */
+  rows: FilesTouchedRow[]
+  /** How many touched files aren't shown as their own row (0 when all fit). */
+  moreCount: number
+  /** The additions those collapsed files account for. */
+  moreAdditions: number
+  /** False only when there's nothing touched at all - lets the caller show an empty state. */
+  hasChanges: boolean
+}
+
+const FILES_TOUCHED_ROW_LIMIT = 3
+
+/**
+ * Rolls the inspector's "Files touched" block up from the diff plus the
+ * Session's own totals. The diff supplies the individual file rows; the
+ * Session's rolled-up counts (present in mock mode) supply the header totals
+ * and let a "N more" row stand in for files beyond the diff sample. In live
+ * mode those counts are absent, so totals fall back to summing the diff and
+ * nothing is collapsed.
+ */
+export function summarizeFilesTouched(files: FileDiff[], meta: SessionDisplay): FilesTouchedSummary {
+  const sum = (pick: (file: FileDiff) => number): number => files.reduce((total, file) => total + pick(file), 0)
+  const totalAdditions = meta.additions ?? sum((file) => file.additions)
+  const totalDeletions = meta.deletions ?? sum((file) => file.deletions)
+  const totalFiles = meta.fileCount ?? files.length
+
+  const rows = files.slice(0, FILES_TOUCHED_ROW_LIMIT).map((file) => ({ path: file.path, additions: file.additions }))
+  const shownAdditions = rows.reduce((total, row) => total + row.additions, 0)
+  const moreCount = Math.max(0, totalFiles - rows.length)
+
+  return {
+    totalAdditions,
+    totalDeletions,
+    rows,
+    moreCount,
+    moreAdditions: Math.max(0, totalAdditions - shownAdditions),
+    hasChanges: totalFiles > 0 || files.length > 0
+  }
 }
