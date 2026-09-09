@@ -819,6 +819,85 @@ describe('Engine.getTranscript', () => {
     expect(transcript[0].id).not.toEqual(transcript[1].id)
   })
 
+  it("includes the CLI's own replies from the on-disk transcript", async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const spawned = await engine.spawnSession('project-1')
+    // The fake Process adapter names a spawned session `cli-<pid>`.
+    discovery.simulateTranscript(`cli-${spawned.pid}`, [
+      { id: 'm1', role: 'user', text: 'add a readme', timestamp: 1 },
+      { id: 'm2', role: 'assistant', text: 'Added README.md.', timestamp: 2 }
+    ])
+
+    const transcript = await engine.getTranscript(spawned.id)
+    expect(transcript.map((message) => ({ role: message.role, text: message.text }))).toEqual([
+      { role: 'user', text: 'add a readme' },
+      { role: 'assistant', text: 'Added README.md.' }
+    ])
+  })
+
+  it('shows an Orca-sent message immediately, then de-dupes it once the transcript catches up', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const spawned = await engine.spawnSession('project-1')
+    await engine.respondToPrompt(spawned.id, 'hello')
+
+    // Before the CLI flushes it to disk, the sent message still shows.
+    expect((await engine.getTranscript(spawned.id)).map((message) => message.text)).toEqual(['hello'])
+
+    // Once the transcript file carries that same user turn plus the reply, the
+    // parsed copy wins and the local overlay is dropped - no duplicate.
+    discovery.simulateTranscript(`cli-${spawned.pid}`, [
+      { id: 'f1', role: 'user', text: 'hello', timestamp: 1 },
+      { id: 'f2', role: 'assistant', text: 'hi there', timestamp: 2 }
+    ])
+    const merged = await engine.getTranscript(spawned.id)
+    expect(merged.map((message) => ({ role: message.role, text: message.text }))).toEqual([
+      { role: 'user', text: 'hello' },
+      { role: 'assistant', text: 'hi there' }
+    ])
+  })
+
+  it('reads the transcript of a discovered session it never spawned', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    discovery.simulateSession({
+      pid: 4242,
+      cwd: '/tmp/my-project',
+      projectPath: '/tmp/my-project',
+      branch: 'discovered-branch',
+      baseRef: 'abc123',
+      status: 'running',
+      cliSessionId: 'cli-discovered'
+    })
+    discovery.simulateTranscript('cli-discovered', [
+      { id: 'd1', role: 'assistant', text: 'started before Orca knew about me', timestamp: 1 }
+    ])
+    await engine.discoverSessions()
+
+    const session = (await engine.listSessions()).find((candidate) => candidate.pid === 4242)!
+    const transcript = await engine.getTranscript(session.id)
+    expect(transcript.map((message) => message.text)).toEqual(['started before Orca knew about me'])
+  })
+
   it('rejects when the session id is unknown', async () => {
     const persistence = createFakePersistenceAdapter()
     const git = createFakeGitAdapter()

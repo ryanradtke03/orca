@@ -62,11 +62,18 @@ const RESPONDABLE_STATUSES: ReadonlySet<Session['status']> = new Set([
 export function createEngine(adapters: EngineAdapters): Engine {
   let projects: Project[] | undefined
   let sessions: Session[] = []
-  // STUB: replace with real transcript capture (parsing `claude logs <id>`
-  // into structured message history) - a follow-up issue's job. Until then,
-  // this only ever reflects messages sent through Orca itself, keyed by
-  // Session id, never anything the CLI actually said.
-  const transcripts = new Map<string, TranscriptMessage[]>()
+  // Maps an Orca Session id to the CLI's own session id (the name of its
+  // on-disk transcript file), recorded the moment a Session is created -
+  // spawn/discover/adopt - so getTranscript can locate the transcript later,
+  // even once the session is terminal and the CLI has dropped it from
+  // `claude agents`. Never cleared: a terminal Session stays in `sessions`,
+  // and so must its transcript key.
+  const cliSessionIds = new Map<string, string>()
+  // Messages sent through Orca itself (via respondToPrompt), kept so a just-
+  // sent user message shows in the transcript immediately rather than only
+  // once the CLI flushes it to the on-disk transcript a poll or two later.
+  // getTranscript overlays these on the real parsed history, de-duplicated.
+  const localMessages = new Map<string, TranscriptMessage[]>()
   // Serializes addProject calls, and reads that must not observe a write mid-flight,
   // so a concurrent read-modify-write can't drop a write or return a stale project list.
   let writeQueue: Promise<unknown> = Promise.resolve()
@@ -291,7 +298,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     }
 
     const { worktreePath, branch, baseRef } = await adapters.git.createWorktree(project.path)
-    const { pid } = await adapters.process.spawnClaude(worktreePath)
+    const { pid, cliSessionId } = await adapters.process.spawnClaude(worktreePath)
 
     return serializeSessionWrite(async () => {
       // A concurrent discoverSessions scan can observe this same pid (once
@@ -315,6 +322,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
         status: 'idle'
       }
       sessions = [...sessions, session]
+      cliSessionIds.set(session.id, cliSessionId)
 
       return session
     })
@@ -428,8 +436,8 @@ export function createEngine(adapters: EngineAdapters): Engine {
   }
 
   function appendTranscriptMessage(sessionId: string, role: TranscriptRole, text: string): void {
-    const existing = transcripts.get(sessionId) ?? []
-    transcripts.set(sessionId, [...existing, { id: randomUUID(), role, text, timestamp: Date.now() }])
+    const existing = localMessages.get(sessionId) ?? []
+    localMessages.set(sessionId, [...existing, { id: randomUUID(), role, text, timestamp: Date.now() }])
   }
 
   function respondToPrompt(sessionId: string, response: string): Promise<Session> {
@@ -455,7 +463,24 @@ export function createEngine(adapters: EngineAdapters): Engine {
     if (!sessions.some((candidate) => candidate.id === sessionId)) {
       throw new Error(`Unknown session: ${sessionId}`)
     }
-    return transcripts.get(sessionId) ?? []
+
+    // The on-disk transcript is the source of truth - the CLI's own side of the
+    // conversation plus every user turn it has flushed. Absent a known CLI id
+    // (shouldn't happen for a tracked session) we fall back to Orca-sent
+    // messages alone.
+    const cliSessionId = cliSessionIds.get(sessionId)
+    const parsed = cliSessionId ? await adapters.discovery.readTranscript(cliSessionId) : []
+
+    // Overlay any Orca-sent user messages the transcript file hasn't caught up
+    // to yet, so a just-sent message shows without waiting for the next poll.
+    // De-duplicated by role+text: once the CLI writes a message through, the
+    // parsed copy wins and the local one is dropped.
+    const seen = new Set(parsed.map((message) => `${message.role}\n${message.text}`))
+    const pendingLocal = (localMessages.get(sessionId) ?? []).filter(
+      (message) => !seen.has(`${message.role}\n${message.text}`)
+    )
+
+    return [...parsed, ...pendingLocal]
   }
 
   function stopSession(sessionId: string): Promise<Session> {
@@ -522,7 +547,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
           const { project, projects: nextProjects } = findOrCreateProject(updatedProjects, entry.projectPath)
           updatedProjects = nextProjects
 
-          newSessions.push({
+          const session: Session = {
             id: randomUUID(),
             projectId: project.id,
             worktreePath: entry.cwd,
@@ -531,7 +556,9 @@ export function createEngine(adapters: EngineAdapters): Engine {
             pid: entry.pid,
             status: entry.status,
             pendingPrompt: entry.pendingPrompt
-          })
+          }
+          if (entry.cliSessionId) cliSessionIds.set(session.id, entry.cliSessionId)
+          newSessions.push(session)
         }
 
         if (updatedProjects !== existingProjects) {
@@ -595,6 +622,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
           pendingPrompt: resolved.pendingPrompt
         }
         sessions = [...sessions, session]
+        if (resolved.cliSessionId) cliSessionIds.set(session.id, resolved.cliSessionId)
 
         return session
       })

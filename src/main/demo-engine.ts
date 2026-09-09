@@ -1,6 +1,7 @@
-import type { FileDiff } from '../shared/ipc-contract'
+import { randomUUID } from 'crypto'
+import type { FileDiff, TranscriptMessage } from '../shared/ipc-contract'
 import { createEngine, type Engine } from './engine/engine'
-import { createFakeDiscoveryAdapter } from './engine/adapters/discovery/fake'
+import { createFakeDiscoveryAdapter, type FakeDiscoveryAdapter } from './engine/adapters/discovery/fake'
 import { createFakeGitAdapter, type FakeGitAdapter } from './engine/adapters/git/fake'
 import { createFakeGitHubAdapter, type FakeGitHubAdapter } from './engine/adapters/github/fake'
 import { createFakeNotificationAdapter } from './engine/adapters/notification/fake'
@@ -30,6 +31,18 @@ const DISCOVERED_PID = 9999
 // Adopt would resolve one.
 const ADOPTABLE_PROJECT_PATH = '/demo/orca-unclaimed'
 const ADOPTABLE_PID = 8888
+
+// The fake Process adapter names a spawned session's CLI id `cli-<pid>` (see
+// process/fake.ts); the discovered session below is seeded directly, so it
+// gets an explicit id to key its transcript off.
+const DISCOVERED_CLI_ID = 'cli-discovered'
+const ADOPTABLE_CLI_ID = 'cli-adoptable'
+
+// Builds a demo TranscriptMessage `minutesAgo` before now, so a seeded
+// conversation reads in a plausible order in the chat pane (#56).
+function demoMessage(role: 'user' | 'assistant', text: string, minutesAgo: number): TranscriptMessage {
+  return { id: randomUUID(), role, text, timestamp: Date.now() - minutesAgo * 60_000 }
+}
 
 const SMALL_DIFF: FileDiff[] = [
   {
@@ -121,7 +134,8 @@ async function seedDemoData(
   engine: Engine,
   git: FakeGitAdapter,
   processAdapter: FakeProcessAdapter,
-  github: FakeGitHubAdapter
+  github: FakeGitHubAdapter,
+  discovery: FakeDiscoveryAdapter
 ): Promise<void> {
   // Freshly spawned, exactly as `claude ... --bg` leaves it: nothing queued
   // yet. The chat pane's always-available message input (#45) is the thing
@@ -135,6 +149,13 @@ async function seedDemoData(
   // (#45) - there's no other way to get one there now that spawning no
   // longer takes an initial task (#44).
   await engine.respondToPrompt(running.id, 'Add a couple of startup log lines')
+  // Give this one a CLI-side reply so opening it shows a real back-and-forth,
+  // not just the user's own message (#56). The user turn is deduped against
+  // the one respondToPrompt appended above.
+  discovery.simulateTranscript(`cli-${running.pid}`, [
+    demoMessage('user', 'Add a couple of startup log lines', 4),
+    demoMessage('assistant', "Added `console.log('starting up')` and `console.log('ready')` in main().", 3)
+  ])
 
   const waiting = await engine.spawnSession(DEMO_PROJECT_ID)
   git.simulateDiff(waiting.worktreePath, SMALL_DIFF)
@@ -142,6 +163,10 @@ async function seedDemoData(
 
   const finished = await engine.spawnSession(DEMO_PROJECT_ID)
   git.simulateDiff(finished.worktreePath, RICH_DIFF)
+  discovery.simulateTranscript(`cli-${finished.pid}`, [
+    demoMessage('user', 'Refactor the auth middleware and add tests', 20),
+    demoMessage('assistant', 'Split the middleware into `requireAuth` and `loadUser`, and added coverage for both. All green.', 18)
+  ])
   processAdapter.simulateExit(finished.pid, 0)
 
   // Local merge (#33): "Request merge" reclaims the worktree the moment the
@@ -209,12 +234,17 @@ export function createDemoEngine(): Engine {
         projectPath: DISCOVERED_PROJECT_PATH,
         branch: 'scratch/quick-fix',
         baseRef: 'base-scratch',
-        status: 'running'
+        status: 'running',
+        cliSessionId: DISCOVERED_CLI_ID
       }
     ]
   })
   processAdapter.registerAlive(DISCOVERED_PID)
   git.simulateDiff(DISCOVERED_PROJECT_PATH, SMALL_DIFF)
+  discovery.simulateTranscript(DISCOVERED_CLI_ID, [
+    demoMessage('user', 'quick fix: the footer year is hardcoded to 2023', 6),
+    demoMessage('assistant', 'Found it in Footer.tsx - swapping the literal for `new Date().getFullYear()`.', 5)
+  ])
 
   // Only resolveManual() can find this one - scan() never reports it, so it
   // stays absent from the sidebar until the user adopts it themselves.
@@ -224,12 +254,17 @@ export function createDemoEngine(): Engine {
     projectPath: ADOPTABLE_PROJECT_PATH,
     branch: 'manual/fix-flaky-test',
     baseRef: 'base-manual',
-    status: 'idle'
+    status: 'idle',
+    cliSessionId: ADOPTABLE_CLI_ID
   })
   git.simulateDiff(ADOPTABLE_PROJECT_PATH, SMALL_DIFF)
+  discovery.simulateTranscript(ADOPTABLE_CLI_ID, [
+    demoMessage('user', 'this test is flaky - fix the race in the poller', 12),
+    demoMessage('assistant', 'The interval fired before the first fetch resolved; awaiting it before scheduling the next tick now.', 11)
+  ])
 
   const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
-  void seedDemoData(engine, git, processAdapter, github).catch((error) => {
+  void seedDemoData(engine, git, processAdapter, github, discovery).catch((error) => {
     console.error('Failed to seed demo data:', error)
   })
 

@@ -1,4 +1,4 @@
-import type { FileDiff, PendingPrompt, Project, SessionStatus } from '../../shared/ipc-contract'
+import type { FileDiff, PendingPrompt, Project, SessionStatus, TranscriptMessage } from '../../shared/ipc-contract'
 
 export type {
   FileDiff,
@@ -7,7 +7,8 @@ export type {
   MergeResult,
   PendingPrompt,
   PendingPromptType,
-  SessionStatus
+  SessionStatus,
+  TranscriptMessage
 } from '../../shared/ipc-contract'
 
 export interface PersistenceAdapter {
@@ -59,6 +60,11 @@ export interface GitHubAdapter {
 
 export interface ProcessInfo {
   pid: number
+  // The CLI's own session id (as it names the on-disk transcript file). The
+  // Engine records it so getTranscript can locate a spawned session's
+  // transcript later, even once the session is terminal and the CLI has
+  // dropped it from `claude agents`.
+  cliSessionId: string
 }
 
 export interface ProcessAdapter {
@@ -93,6 +99,13 @@ export interface DiscoveredSession {
   // Engine adopts a discovered session it can be polled by
   // refreshSessionStatuses exactly like a spawned one.
   pid: number
+  // The CLI's own session id (the name of its on-disk transcript file) - lets
+  // the Engine read a discovered/adopted session's transcript, the same way a
+  // spawned one's ProcessInfo.cliSessionId does. The real adapter always
+  // resolves it (it's the same id scan/resolveManual already key off);
+  // optional only so a Session without a transcript to read is still
+  // expressible, and the Engine simply has no transcript to fetch for it.
+  cliSessionId?: string
   // The directory the session is actually running in - becomes the
   // Session's worktreePath, whether or not it's an Orca-managed worktree.
   cwd: string
@@ -122,6 +135,13 @@ export interface DiscoveryAdapter {
   // itself, the caller-supplied directory is authoritative here. Returns null
   // when pid doesn't correspond to a running Claude Code session.
   resolveManual(pid: number, directory: string): Promise<DiscoveredSession | null>
+  // Reads a session's full message history from its on-disk transcript, keyed
+  // by the CLI session id (ProcessInfo/DiscoveredSession.cliSessionId). Works
+  // for any session with a transcript on disk - spawned, discovered, or
+  // adopted, running or terminal. Returns [] when the transcript can't be
+  // found or read (never throws), so a missing/locked file just yields an
+  // empty history rather than failing getTranscript.
+  readTranscript(cliSessionId: string): Promise<TranscriptMessage[]>
 }
 
 export interface EngineAdapters {

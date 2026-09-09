@@ -1,10 +1,10 @@
 import { execFile } from 'child_process'
 import type { Dirent } from 'fs'
-import { open, readdir } from 'fs/promises'
+import { open, readdir, readFile } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
-import type { PendingPrompt, PendingPromptType, SessionStatus } from '../../../../shared/ipc-contract'
+import type { PendingPrompt, PendingPromptType, SessionStatus, TranscriptMessage } from '../../../../shared/ipc-contract'
 import type { DiscoveredSession, DiscoveryAdapter } from '../../adapters'
 import {
   createAgentStatusLister,
@@ -13,6 +13,7 @@ import {
   type ListAgentStatuses
 } from '../../claude-cli/agent-status'
 import { extractPromptText, renderScreen } from '../../claude-cli/prompt-text'
+import { parseTranscript } from '../../claude-cli/transcript-file'
 
 const execFileAsync = promisify(execFile)
 
@@ -204,7 +205,7 @@ export function createRealDiscoveryAdapter(
           if (!projectPath) return null
 
           const details = await resolveSessionDetails({ ...entry, id: entry.id }, cwd)
-          return { pid: entry.pid, cwd, projectPath, ...details }
+          return { pid: entry.pid, cwd, projectPath, cliSessionId: entry.id, ...details }
         })
       )
 
@@ -226,7 +227,22 @@ export function createRealDiscoveryAdapter(
       if (!projectPath) return null
 
       const details = await resolveSessionDetails({ ...entry, id: entry.id }, directory)
-      return { pid, cwd: directory, projectPath, ...details }
+      return { pid, cwd: directory, projectPath, cliSessionId: entry.id, ...details }
+    },
+
+    async readTranscript(cliSessionId: string): Promise<TranscriptMessage[]> {
+      // The transcript file is named <cliSessionId>.jsonl, but nested under a
+      // per-cwd directory whose name we can't reconstruct losslessly - so find
+      // it by id via the same tree walk scan() uses.
+      const transcriptPath = (await buildTranscriptIndex(transcriptsRootDir)).get(cliSessionId)
+      if (!transcriptPath) return []
+      try {
+        return parseTranscript(await readFile(transcriptPath, 'utf-8'))
+      } catch {
+        // A missing or unreadable transcript just means no history to show
+        // yet - never a reason to fail getTranscript.
+        return []
+      }
     }
   }
 }

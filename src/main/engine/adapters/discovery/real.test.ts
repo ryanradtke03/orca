@@ -69,6 +69,7 @@ describe('createRealDiscoveryAdapter', () => {
         // /tmp -> /private/tmp), so the resolved projectPath can differ from
         // the raw cwd the transcript reported.
         projectPath: await realpath(projectPath),
+        cliSessionId: 'session-1',
         branch: expect.any(String),
         baseRef: expect.any(String),
         status: 'running',
@@ -218,6 +219,7 @@ describe('createRealDiscoveryAdapter', () => {
         pid: 4242,
         cwd: projectPath,
         projectPath: await realpath(projectPath),
+        cliSessionId: 'session-1',
         branch: expect.any(String),
         baseRef: expect.any(String),
         status: 'running',
@@ -255,6 +257,47 @@ describe('createRealDiscoveryAdapter', () => {
       const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
 
       await expect(adapter.resolveManual(4242, projectPath)).resolves.toBeNull()
+    })
+  })
+
+  describe('readTranscript', () => {
+    async function writeTranscriptLines(sessionId: string, lines: unknown[]): Promise<void> {
+      const sessionDir = join(transcriptsRootDir, 'nested', 'dir')
+      await mkdir(sessionDir, { recursive: true })
+      await writeFile(
+        join(sessionDir, `${sessionId}.jsonl`),
+        lines.map((line) => JSON.stringify(line)).join('\n') + '\n'
+      )
+    }
+
+    it('locates the transcript by CLI session id and parses its conversation turns', async () => {
+      await writeTranscriptLines('session-1', [
+        { type: 'mode', mode: 'default' },
+        {
+          type: 'user',
+          uuid: 'u1',
+          timestamp: '2026-09-03T23:41:17.707Z',
+          message: { role: 'user', content: 'add a readme' }
+        },
+        {
+          type: 'assistant',
+          uuid: 'a1',
+          timestamp: '2026-09-03T23:41:22.000Z',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] }
+        }
+      ])
+      const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir)
+
+      const transcript = await adapter.readTranscript('session-1')
+      expect(transcript.map((message) => ({ role: message.role, text: message.text }))).toEqual([
+        { role: 'user', text: 'add a readme' },
+        { role: 'assistant', text: 'Done.' }
+      ])
+    })
+
+    it('returns an empty history when no transcript file exists for the id', async () => {
+      const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir)
+      await expect(adapter.readTranscript('nonexistent')).resolves.toEqual([])
     })
   })
 })
