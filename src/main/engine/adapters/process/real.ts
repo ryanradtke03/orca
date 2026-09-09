@@ -51,24 +51,24 @@ export function createRealProcessAdapter(
 ): ProcessAdapter {
   const sessions = new Map<number, TrackedSession>()
 
-  // Captures a waiting session's prompt. A blocked session must end up with a
-  // (non-null) pendingPrompt even before its dialog text is readable, so the
-  // engine reclassifies it as respondable rather than leaving it stuck as
-  // `running` - so on a transient `claude logs` failure (or a session that's
-  // simply ready for the next message, with no dialog on screen) we still set a
-  // bare input prompt, and only re-fetch until real text lands. Once we have
-  // that text we stop, so we don't re-run `claude logs` + rebuild a terminal
-  // emulator every 300ms tick for a dialog that hasn't changed.
+  // Captures a waiting session's prompt once per blocked episode. We fetch and
+  // render `claude logs` only when we don't already have a prompt (cleared each
+  // time the session leaves `blocked`), so a still-waiting session doesn't
+  // re-run logs + rebuild a terminal emulator every 300ms tick. A `logs` failure
+  // leaves the prompt unset and retries next tick rather than guessing a type -
+  // so a permission dialog is never transiently mislabeled as (respondable)
+  // input, which would offer the wrong control surface and fire a wrong-typed
+  // notification. An empty render is a genuine signal (a session ready for the
+  // next message, with no dialog on screen), so it classifies as input.
   async function refreshPendingPrompt(tracked: TrackedSession, waitingFor: string | undefined): Promise<void> {
-    if (tracked.pendingPrompt?.text) return
+    if (tracked.pendingPrompt) return
 
-    let text = ''
+    let text: string
     try {
       const { stdout } = await execFileAsync(command, ['logs', tracked.id])
       text = extractPromptText(await renderScreen(stdout))
     } catch {
-      // Transient `claude logs` failure - fall through to a bare prompt so the
-      // session still becomes respondable; a later tick can enrich it.
+      return
     }
     tracked.pendingPrompt = { type: classifyPromptText(text, waitingFor), text }
   }
