@@ -113,7 +113,7 @@ export function SessionScreen({
   // Both load once per sessionId (not on every status-poll tick). Either
   // initial-load failure errors the whole screen.
   const { files, loadError: diffError } = useDiff(sessionId)
-  const { messages, loadError: transcriptError, refresh: refreshTranscript } = useTranscript(sessionId)
+  const { messages, loadError: transcriptError, appendOptimistic, settleOptimistic } = useTranscript(sessionId)
   const loadError = diffError ?? transcriptError
   const [sendError, setSendError] = useState('')
 
@@ -136,17 +136,22 @@ export function SessionScreen({
   // back to the plain polled messages (live mode).
   const entries: TranscriptEntry[] = session.transcript ?? messagesToEntries(messages)
 
-  // A composer send or an in-thread permission answer both route here. The
-  // engine appends the sent message to its own transcript, so on success we
-  // refresh at once rather than waiting up to ~2s for the next poll. A rejection
-  // (e.g. the session flipped to `running`) surfaces inline and keeps the input.
-  const respond = async (response: string): Promise<boolean> => {
+  // A composer send or an in-thread permission answer both route here. The write
+  // path takes ~1s to resolve, so a composer reply is echoed optimistically
+  // (`optimistic`) to show at once; permission digits ("1"/"3") are not, since a
+  // lone digit reads as noise in the thread. On success the engine has appended
+  // the message, so settleOptimistic fetches it and drops the local echo; a
+  // rejection (e.g. the session flipped to `running`) rolls the echo back and
+  // surfaces inline, keeping the composer's text.
+  const respond = async (response: string, optimistic = false): Promise<boolean> => {
+    const echoId = optimistic ? appendOptimistic(response) : null
     try {
       await onRespondToPrompt(session.id, response)
       setSendError('')
-      refreshTranscript()
+      if (echoId) await settleOptimistic(echoId, true)
       return true
     } catch (error) {
+      if (echoId) await settleOptimistic(echoId, false)
       const message = `Failed to send: ${describeError(error)}`
       console.error(message, error)
       setSendError(message)
@@ -178,7 +183,7 @@ export function SessionScreen({
           queuedCount={session.queuedPrompts?.length ?? 0}
           canSend={canSendMessage(session.status)}
           error={sendError}
-          onSend={respond}
+          onSend={(text) => respond(text, true)}
         />
       </main>
       <Inspector session={session} files={files} mergeMode={project?.mergeMode} />

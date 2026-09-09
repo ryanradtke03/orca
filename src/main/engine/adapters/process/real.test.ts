@@ -202,6 +202,22 @@ describe('createRealProcessAdapter', () => {
     })
   })
 
+  it('treats a blocked session with no dialog on screen as a plain input prompt', async () => {
+    const adapter = createRealProcessAdapter(FAKE_CLI)
+    const { pid } = await adapter.spawnClaude(dir)
+
+    // "Ready for the next message" - blocked on the user, but no dialog to read.
+    // It must still surface a (respondable) input prompt so the session doesn't
+    // stay stuck as running; the empty screen classifies as input.
+    const entry = entryForPid(pid)
+    entry.processState = 'blocked'
+    entry.screen = ''
+    writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
+
+    await waitUntil(() => adapter.pendingPrompt(pid) !== null)
+    expect(adapter.pendingPrompt(pid)).toEqual({ type: 'input', text: '' })
+  })
+
   it('sends a response through a pty attach and clears the pending prompt', async () => {
     const adapter = createRealProcessAdapter(FAKE_CLI)
     const { pid } = await adapter.spawnClaude(dir)

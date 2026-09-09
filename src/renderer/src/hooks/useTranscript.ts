@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TranscriptMessage } from '../../../shared/ipc-contract'
 import { orca } from '../api/orca-client'
 import { describeError } from '../describe-error'
@@ -10,11 +10,17 @@ export interface TranscriptLoad {
   /** Set only if the *initial* load failed; poll failures log and are ignored. */
   loadError: string | null
   /**
-   * Re-fetches the transcript now, ahead of the next 2s tick - used after a
-   * send so the engine's just-appended message shows without the poll delay.
-   * Failures only log (like a poll tick), never surfacing over already-good content.
+   * Optimistically shows `text` as a just-sent user message right away, so a
+   * send reflects instantly rather than after the ~1s write path resolves.
+   * Returns an id to hand `settleOptimistic` once the send lands (or fails).
    */
-  refresh: () => void
+  appendOptimistic: (text: string) => string
+  /**
+   * Reconciles an optimistic message once its send settled: on success, fetches
+   * the server transcript (which now carries the message) and drops the local
+   * echo in the same render so it never flickers; on failure, just drops it.
+   */
+  settleOptimistic: (id: string, sent: boolean) => Promise<void>
 }
 
 /**
@@ -23,51 +29,85 @@ export interface TranscriptLoad {
  * permission card) rides along on the session itself and the screen prefers
  * that. The *initial* load's failure surfaces as `loadError`; a transient poll
  * failure only logs, so a blip never tears down an already-rendered screen.
- * `inFlight` skips a tick while the previous fetch is still outstanding;
- * `cancelled` drops a response that resolves after navigating away.
+ *
+ * Optimistic sends ride in a separate `pending` list appended after the server
+ * transcript, so a just-sent message shows instantly and is dropped only once
+ * the server copy has landed (see settleOptimistic). A request token (`seq`)
+ * means the most recent fetch always wins, so a slow background poll can't
+ * clobber a fresher post-send fetch with its stale result; `inFlight` only
+ * throttles the background poll, never a forced fetch.
  */
 export function useTranscript(sessionId: string): TranscriptLoad {
-  const [messages, setMessages] = useState<TranscriptMessage[]>([])
+  const [serverMessages, setServerMessages] = useState<TranscriptMessage[]>([])
+  const [pending, setPending] = useState<TranscriptMessage[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const inFlight = useRef(false)
-  // The session the latest fetch was for, so a response that resolves after
-  // navigating to another session (or back) is dropped rather than applied.
+  // Monotonic request id: a fetch's result is only used if it is still the
+  // latest, so an out-of-order response (a slow poll resolving after a fresh
+  // fetch, or one arriving after navigating away) is dropped.
+  const seq = useRef(0)
   const activeSessionId = useRef(sessionId)
 
-  // A single non-initial fetch: refreshes messages, only logs on failure, and
-  // skips while a previous fetch is still outstanding. Shared by the 2s poll
-  // and the on-demand `refresh` a send triggers.
-  const poll = useCallback((): void => {
-    if (inFlight.current) return
+  const messages = useMemo(() => [...serverMessages, ...pending], [serverMessages, pending])
+
+  // Fetches the transcript and returns it, or null when the result is stale
+  // (superseded by a newer request, a different session, or a failure). Doesn't
+  // touch state itself, so callers can apply it together with related updates in
+  // one render. `force` fetches even while a background poll is outstanding (so a
+  // send reflects at once); the plain poll throttles itself so ticks don't stack.
+  const fetchTranscript = useCallback(async (force: boolean): Promise<TranscriptMessage[] | null> => {
+    if (inFlight.current && !force) return null
     inFlight.current = true
+    const token = ++seq.current
     const forSessionId = activeSessionId.current
-    orca
-      .getTranscript(forSessionId)
-      .then((next) => {
-        if (activeSessionId.current === forSessionId) setMessages(next)
-      })
-      .catch((error: unknown) => {
-        console.error(`Failed to refresh transcript for ${forSessionId}:`, error)
-      })
-      .finally(() => {
-        inFlight.current = false
-      })
+    try {
+      const next = await orca.getTranscript(forSessionId)
+      return token === seq.current && activeSessionId.current === forSessionId ? next : null
+    } catch (error) {
+      console.error(`Failed to refresh transcript for ${forSessionId}:`, error)
+      return null
+    } finally {
+      inFlight.current = false
+    }
   }, [])
 
-  // Initial load.
+  const appendOptimistic = useCallback((text: string): string => {
+    const id = crypto.randomUUID()
+    setPending((prev) => [...prev, { id, role: 'user', text, timestamp: Date.now() }])
+    return id
+  }, [])
+
+  const settleOptimistic = useCallback(
+    async (id: string, sent: boolean): Promise<void> => {
+      // On success the engine has appended this message, so pull the fresh
+      // server copy and drop the echo together - React batches both updates into
+      // one render, so the message never blinks out between them. On failure the
+      // server never got it, so just roll the echo back.
+      if (sent) {
+        const next = await fetchTranscript(true)
+        if (next) setServerMessages(next)
+      }
+      setPending((prev) => prev.filter((message) => message.id !== id))
+    },
+    [fetchTranscript]
+  )
+
+  // Initial load. Clears optimistic sends carried over from a previous session.
   useEffect(() => {
     let cancelled = false
     activeSessionId.current = sessionId
-    setMessages([])
+    const token = ++seq.current
+    setServerMessages([])
+    setPending([])
     setLoadError(null)
     setLoaded(false)
 
     orca
       .getTranscript(sessionId)
       .then((next) => {
-        if (cancelled) return
-        setMessages(next)
+        if (cancelled || token !== seq.current) return
+        setServerMessages(next)
         setLoaded(true)
       })
       .catch((error: unknown) => {
@@ -82,9 +122,13 @@ export function useTranscript(sessionId: string): TranscriptLoad {
   // Poll, but only once the initial load has landed.
   useEffect(() => {
     if (!loaded) return
-    const interval = setInterval(poll, TRANSCRIPT_POLL_INTERVAL_MS)
+    const interval = setInterval(() => {
+      void fetchTranscript(false).then((next) => {
+        if (next) setServerMessages(next)
+      })
+    }, TRANSCRIPT_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [loaded, poll])
+  }, [loaded, fetchTranscript])
 
-  return { messages, loadError, refresh: poll }
+  return { messages, loadError, appendOptimistic, settleOptimistic }
 }
