@@ -55,11 +55,16 @@ if (subcommand === '--bg') {
 
   state.entries.push({
     id,
+    // The real CLI files a session's transcript under its full session UUID,
+    // of which `id` is the first segment; mirror that so prefix resolution is
+    // exercised. `processState` is the CLI's `state`: 'running' (working),
+    // 'blocked' (waiting on the user), or 'done'.
+    sessionId: `${id}-0000-4000-8000-000000000000`,
     pid: worker.pid,
     cwd: process.cwd(),
     status: 'idle',
     waitingFor: undefined,
-    processState: 'blocked',
+    processState: 'running',
     screen: ''
   })
   writeState(state)
@@ -81,13 +86,14 @@ if (subcommand === '--worker') {
     if (isAlive(entry.pid)) {
       return {
         id: entry.id,
+        sessionId: entry.sessionId,
         pid: entry.pid,
         status: entry.status,
         waitingFor: entry.waitingFor,
         state: entry.processState
       }
     }
-    return { id: entry.id, state: entry.processState === 'done' ? 'done' : 'crashed' }
+    return { id: entry.id, sessionId: entry.sessionId, state: entry.processState === 'done' ? 'done' : 'crashed' }
   })
   process.stdout.write(JSON.stringify(output))
 } else if (subcommand === 'logs') {
