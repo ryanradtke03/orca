@@ -1,4 +1,5 @@
 import type { TranscriptMessage } from '../../../../shared/ipc-contract'
+import { permissionResponse } from '../../view-models/prompt-view'
 import {
   toolNameFromCommand,
   type PermissionCardEntry,
@@ -51,10 +52,16 @@ function ToolCallChip({ entry }: { entry: ToolCallEntry }): React.JSX.Element {
 
 /**
  * The in-thread permission card. Its three responses (Approve once / Always
- * allow / Deny) are inert for now (ticket #51) - answering a prompt against the
- * engine is a later ticket.
+ * allow / Deny) answer the prompt against the engine via `respondToPrompt`
+ * (#60), each sending the digit that selects its TUI option (see prompt-view).
  */
-function PermissionCard({ entry }: { entry: PermissionCardEntry }): React.JSX.Element {
+function PermissionCard({
+  entry,
+  onRespond
+}: {
+  entry: PermissionCardEntry
+  onRespond: (response: string) => void
+}): React.JSX.Element {
   const toolName = toolNameFromCommand(entry.command)
   return (
     <div className="rounded-lg border border-border-medium bg-panel px-4 py-4">
@@ -72,13 +79,13 @@ function PermissionCard({ entry }: { entry: PermissionCardEntry }): React.JSX.El
       </div>
       <p className="mt-3 mb-4 text-[12px] leading-relaxed text-secondary">{entry.detail}</p>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn">
+        <button type="button" className="btn" onClick={() => onRespond(permissionResponse('approve-once'))}>
           Approve once · ⏎
         </button>
-        <button type="button" className="btn-ghost">
+        <button type="button" className="btn-ghost" onClick={() => onRespond(permissionResponse('always-allow'))}>
           Always allow{toolName ? ` ${toolName}` : ''}
         </button>
-        <button type="button" className="btn-ghost">
+        <button type="button" className="btn-ghost" onClick={() => onRespond(permissionResponse('deny'))}>
           Deny · esc
         </button>
       </div>
@@ -86,7 +93,13 @@ function PermissionCard({ entry }: { entry: PermissionCardEntry }): React.JSX.El
   )
 }
 
-function TranscriptEntryView({ entry }: { entry: TranscriptEntry }): React.JSX.Element {
+function TranscriptEntryView({
+  entry,
+  onRespond
+}: {
+  entry: TranscriptEntry
+  onRespond: (response: string) => void
+}): React.JSX.Element {
   if (entry.kind === 'message') {
     return entry.message.role === 'user' ? (
       <UserBubble message={entry.message} />
@@ -95,10 +108,17 @@ function TranscriptEntryView({ entry }: { entry: TranscriptEntry }): React.JSX.E
     )
   }
   if (entry.kind === 'tool-call') return <ToolCallChip entry={entry} />
-  return <PermissionCard entry={entry} />
+  return <PermissionCard entry={entry} onRespond={onRespond} />
 }
 
-export function ChatPane({ entries }: { entries: TranscriptEntry[] }): React.JSX.Element {
+export function ChatPane({
+  entries,
+  onRespond
+}: {
+  entries: TranscriptEntry[]
+  /** Answers an in-thread permission card - the response string selects its TUI option. */
+  onRespond: (response: string) => void
+}): React.JSX.Element {
   return (
     <div id="session-chat" className="flex-1 overflow-y-auto px-6 py-6">
       {entries.length === 0 ? (
@@ -106,7 +126,11 @@ export function ChatPane({ entries }: { entries: TranscriptEntry[] }): React.JSX
       ) : (
         <div className="mx-auto flex max-w-[760px] flex-col gap-4">
           {entries.map((entry) => (
-            <TranscriptEntryView key={entry.kind === 'message' ? entry.message.id : entry.id} entry={entry} />
+            <TranscriptEntryView
+              key={entry.kind === 'message' ? entry.message.id : entry.id}
+              entry={entry}
+              onRespond={onRespond}
+            />
           ))}
         </div>
       )}

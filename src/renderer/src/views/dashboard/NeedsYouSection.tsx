@@ -1,11 +1,13 @@
 import { describeNeedsYou, type HomeSession } from '../../view-models/session'
+import { permissionResponse } from '../../view-models/prompt-view'
 import { StatusMarker } from '../../components/StatusMarker'
 
 /**
- * The inline actions a "Needs you" card offers are still visual-only no-ops -
- * wiring approve/deny/reply to real IPC is deferred (ticket #50). They
- * stopPropagation so a click answers the card in place rather than falling
- * through to the row's own navigation.
+ * A "Needs you" card's inline actions answer the prompt in place (#60):
+ * Approve/Deny send a permission response via `respondToPrompt`, while Reply
+ * opens the session so the answer can be typed in its composer. They
+ * stopPropagation so a click answers the card rather than falling through to
+ * the row's own navigation.
  */
 function CardActions({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
@@ -18,11 +20,13 @@ function CardActions({ children }: { children: React.ReactNode }): React.JSX.Ele
 function NeedsYouRow({
   session,
   projectName,
-  onOpen
+  onOpen,
+  onRespond
 }: {
   session: HomeSession
   projectName: string
   onOpen: (sessionId: string) => void
+  onRespond: (sessionId: string, response: string) => void
 }): React.JSX.Element {
   const summary = describeNeedsYou(session)
 
@@ -55,15 +59,15 @@ function NeedsYouRow({
       <CardActions>
         {summary.kind === 'permission' ? (
           <>
-            <button type="button" className="btn-ghost">
+            <button type="button" className="btn-ghost" onClick={() => onRespond(session.id, permissionResponse('deny'))}>
               Deny
             </button>
-            <button type="button" className="btn">
+            <button type="button" className="btn" onClick={() => onRespond(session.id, permissionResponse('approve-once'))}>
               Approve
             </button>
           </>
         ) : (
-          <button type="button" className="btn">
+          <button type="button" className="btn" onClick={() => onOpen(session.id)}>
             Reply
           </button>
         )}
@@ -75,11 +79,13 @@ function NeedsYouRow({
 export function NeedsYouSection({
   attention,
   projectNameFor,
-  onOpen
+  onOpen,
+  onRespond
 }: {
   attention: HomeSession[]
   projectNameFor: (projectId: string) => string
   onOpen: (sessionId: string) => void
+  onRespond: (sessionId: string, response: string) => void
 }): React.JSX.Element | null {
   if (attention.length === 0) return null
 
@@ -97,6 +103,7 @@ export function NeedsYouSection({
             session={session}
             projectName={projectNameFor(session.projectId)}
             onOpen={onOpen}
+            onRespond={onRespond}
           />
         ))}
       </div>

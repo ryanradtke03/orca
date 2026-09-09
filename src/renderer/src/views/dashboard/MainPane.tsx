@@ -12,6 +12,7 @@ export function MainPane({
   onOpenDiff,
   onStopSession,
   onNewSession,
+  onRespondToPrompt,
   onOpenAdopt
 }: {
   sessions: Session[]
@@ -22,6 +23,7 @@ export function MainPane({
   onOpenDiff: (sessionId: string) => void
   onStopSession: (sessionId: string) => void
   onNewSession: (projectId: string) => void
+  onRespondToPrompt: (sessionId: string, response: string) => void
   onOpenAdopt: () => void
 }): React.JSX.Element {
   const stats = summarizeStatuses(sessions)
@@ -56,7 +58,12 @@ export function MainPane({
         </div>
       </div>
 
-      <NeedsYouSection attention={attention} projectNameFor={projectNameFor} onOpen={onOpenSession} />
+      <NeedsYouSection
+        attention={attention}
+        projectNameFor={projectNameFor}
+        onOpen={onOpenSession}
+        onRespond={onRespondToPrompt}
+      />
 
       <div className="pb-6">
         {groups.map((group) => (

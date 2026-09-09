@@ -3,8 +3,10 @@ import { promisify } from 'util'
 import * as pty from 'node-pty'
 import type { PendingPrompt, ProcessAdapter, ProcessInfo } from '../../adapters'
 import {
+  classifyPromptText,
   createAgentStatusLister,
-  promptTypeFromStatus,
+  isWaitingOnUser,
+  terminalExitCode,
   type AgentStatusEntry,
   type ListAgentStatuses
 } from '../../claude-cli/agent-status'
@@ -49,29 +51,26 @@ export function createRealProcessAdapter(
 ): ProcessAdapter {
   const sessions = new Map<number, TrackedSession>()
 
-  // Only re-fetches and re-renders the screen when the prompt's category
-  // actually changed - otherwise every 300ms tick would re-run `claude logs`
-  // and rebuild a terminal emulator for every waiting session indefinitely,
-  // just to reconfirm a dialog that hasn't changed.
+  // Captures a waiting session's prompt. A blocked session must end up with a
+  // (non-null) pendingPrompt even before its dialog text is readable, so the
+  // engine reclassifies it as respondable rather than leaving it stuck as
+  // `running` - so on a transient `claude logs` failure (or a session that's
+  // simply ready for the next message, with no dialog on screen) we still set a
+  // bare input prompt, and only re-fetch until real text lands. Once we have
+  // that text we stop, so we don't re-run `claude logs` + rebuild a terminal
+  // emulator every 300ms tick for a dialog that hasn't changed.
   async function refreshPendingPrompt(tracked: TrackedSession, waitingFor: string | undefined): Promise<void> {
-    const type = promptTypeFromStatus({ status: 'waiting', waitingFor })
-    if (!type) {
-      tracked.pendingPrompt = null
-      return
-    }
-    if (tracked.pendingPrompt?.type === type) return
+    if (tracked.pendingPrompt?.text) return
 
-    let stdout: string
+    let text = ''
     try {
-      stdout = (await execFileAsync(command, ['logs', tracked.id])).stdout
+      const { stdout } = await execFileAsync(command, ['logs', tracked.id])
+      text = extractPromptText(await renderScreen(stdout))
     } catch {
-      // Leave whatever pendingPrompt we already had - a transient `claude
-      // logs` failure isn't evidence the prompt went away.
-      return
+      // Transient `claude logs` failure - fall through to a bare prompt so the
+      // session still becomes respondable; a later tick can enrich it.
     }
-    const lines = await renderScreen(stdout)
-    const text = extractPromptText(lines)
-    if (text) tracked.pendingPrompt = { type, text }
+    tracked.pendingPrompt = { type: classifyPromptText(text, waitingFor), text }
   }
 
   let pollInFlight = false
@@ -95,22 +94,32 @@ export function createRealProcessAdapter(
         if (!tracked.alive) continue
         const entry = byId.get(tracked.id)
 
-        // Once a session's underlying process is gone - it finished,
-        // crashed, or was stopped - the CLI keeps a stub entry around (for
-        // `claude rm`) but drops its `pid`.
-        if (!entry || entry.pid === undefined) {
+        // Dropped from the listing entirely - the CLI no longer knows this
+        // session at all, so treat it as gone (errored).
+        if (!entry) {
           tracked.alive = false
-          tracked.exitCode = entry?.state === 'done' ? 0 : 1
+          tracked.exitCode = 1
+          tracked.pendingPrompt = null
+          continue
+        }
+
+        // The CLI reports a terminal outcome via `state` (done / failed); it
+        // keeps a stub entry around (for `claude rm`) rather than dropping the
+        // session immediately.
+        const exitCode = terminalExitCode(entry)
+        if (exitCode !== null) {
+          tracked.alive = false
+          tracked.exitCode = exitCode
           tracked.pendingPrompt = null
           // Best-effort: without this, every session Orca ever spawns stays
           // in the CLI's own history forever, which both clutters `claude
           // agents` and (on a machine with a lot of accumulated history)
           // appears to slow down listing itself.
-          if (entry) void execFileAsync(command, ['rm', tracked.id]).catch(() => {})
+          void execFileAsync(command, ['rm', tracked.id]).catch(() => {})
           continue
         }
 
-        if (entry.status === 'waiting') {
+        if (isWaitingOnUser(entry)) {
           await refreshPendingPrompt(tracked, entry.waitingFor)
         } else {
           tracked.pendingPrompt = null

@@ -11,11 +11,14 @@ const FAKE_CLI = join(__dirname, '../../claude-cli/fake-cli.cjs')
 
 interface FakeEntry {
   id: string
+  sessionId?: string
   pid: number
   cwd: string
   status: 'idle' | 'busy' | 'waiting'
   waitingFor?: string
-  processState: 'blocked' | 'done'
+  // The CLI's `state`: 'running' (working), 'blocked' (waiting on the user), or
+  // 'done'. A killed worker the fake reports as 'crashed'.
+  processState: 'running' | 'blocked' | 'done'
   screen: string
   responses?: string[]
 }
@@ -138,7 +141,7 @@ describe('createRealProcessAdapter', () => {
     const externalPid = external.pid
     if (externalPid === undefined) throw new Error('failed to spawn external worker process')
     writeEntries([
-      { id: 'external-session', pid: externalPid, cwd: dir, status: 'busy', processState: 'blocked', screen: '' }
+      { id: 'external-session', pid: externalPid, cwd: dir, status: 'busy', processState: 'running', screen: '' }
     ])
     expect(adapter.isAlive(externalPid)).toBe(false)
 
@@ -164,34 +167,35 @@ describe('createRealProcessAdapter', () => {
     expect(adapter.pendingPrompt(pid)).toBeNull()
   })
 
-  it('detects a permission prompt once the session reports waiting on one', async () => {
+  it('detects a permission prompt from the dialog once the session is blocked', async () => {
     const adapter = createRealProcessAdapter(FAKE_CLI)
     const { pid } = await adapter.spawnClaude(dir)
 
+    // state: 'blocked' is the CLI's "waiting on the user" signal; the kind
+    // (permission vs input) is classified from the rendered dialog, since the
+    // current CLI no longer tags it with waitingFor.
     const entry = entryForPid(pid)
-    entry.status = 'waiting'
-    entry.waitingFor = 'permission prompt'
+    entry.processState = 'blocked'
     entry.screen = 'Bash command\r\n\r\n  npm install\r\n\r\nDo you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n'
     writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
 
-    await waitUntil(() => adapter.pendingPrompt(pid) !== null)
+    await waitUntil(() => adapter.pendingPrompt(pid)?.text !== undefined && adapter.pendingPrompt(pid)?.text !== '')
     expect(adapter.pendingPrompt(pid)).toEqual({
       type: 'permission',
       text: expect.stringContaining('Do you want to proceed?')
     })
   })
 
-  it('detects an input prompt once the session reports waiting on one', async () => {
+  it('detects an input prompt from a clarifying question once the session is blocked', async () => {
     const adapter = createRealProcessAdapter(FAKE_CLI)
     const { pid } = await adapter.spawnClaude(dir)
 
     const entry = entryForPid(pid)
-    entry.status = 'waiting'
-    entry.waitingFor = 'input needed'
+    entry.processState = 'blocked'
     entry.screen = 'Which auth approach should I use?\r\n❯ 1. OAuth\r\n  2. API key\r\n'
     writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
 
-    await waitUntil(() => adapter.pendingPrompt(pid) !== null)
+    await waitUntil(() => adapter.pendingPrompt(pid)?.text !== undefined && adapter.pendingPrompt(pid)?.text !== '')
     expect(adapter.pendingPrompt(pid)).toEqual({
       type: 'input',
       text: expect.stringContaining('Which auth approach')
@@ -203,8 +207,7 @@ describe('createRealProcessAdapter', () => {
     const { pid } = await adapter.spawnClaude(dir)
 
     const entry = entryForPid(pid)
-    entry.status = 'waiting'
-    entry.waitingFor = 'permission prompt'
+    entry.processState = 'blocked'
     entry.screen = 'Do you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n'
     writeEntries(readEntries().map((candidate) => (candidate.pid === pid ? entry : candidate)))
     await waitUntil(() => adapter.pendingPrompt(pid) !== null)

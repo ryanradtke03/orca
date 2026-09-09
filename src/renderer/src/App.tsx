@@ -60,6 +60,28 @@ export function App(): React.JSX.Element {
     }
   }
 
+  // Answer a prompt (permission approve/deny, or a reply to a waiting/idle
+  // session) and reflect the returned Session optimistically. respondToPrompt
+  // *throws* for a `running` session - RESPONDABLE_STATUSES (engine.ts) excludes
+  // it - so every caller must handle the rejection rather than assume success.
+  // This raw form rethrows; the two surfaces below each surface it their own way.
+  async function respondToPrompt(sessionId: string, response: string): Promise<void> {
+    applySession(await orca.respondToPrompt(sessionId, response))
+  }
+
+  // Dashboard idiom (Group A): a failed "Needs you" approve/deny surfaces on the
+  // status line and always logs; it never crashes the app.
+  async function handleRespondFromDashboard(sessionId: string, response: string): Promise<void> {
+    try {
+      await respondToPrompt(sessionId, response)
+      setStatusMessage('')
+    } catch (error) {
+      const message = `Failed to answer prompt: ${describeError(error)}`
+      console.error(message, error)
+      setStatusMessage(message)
+    }
+  }
+
   // The happy path only: adopt the session and reflect it optimistically. The
   // AdoptSessionModal owns validation and inline error display, so failures
   // reject back to it (staying open) rather than being swallowed here.
@@ -84,6 +106,7 @@ export function App(): React.JSX.Element {
         onOpenDiff={openDiff}
         onStopSession={handleStopSession}
         onNewSession={handleNewSession}
+        onRespondToPrompt={respondToPrompt}
       />
     )
   } else {
@@ -97,6 +120,7 @@ export function App(): React.JSX.Element {
         onOpenDiff={openDiff}
         onStopSession={handleStopSession}
         onNewSession={handleNewSession}
+        onRespondToPrompt={handleRespondFromDashboard}
         onOpenAdopt={() => setAdoptOpen(true)}
       />
     )

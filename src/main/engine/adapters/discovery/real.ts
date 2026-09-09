@@ -4,11 +4,13 @@ import { open, readdir, readFile } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
-import type { PendingPrompt, PendingPromptType, SessionStatus, TranscriptMessage } from '../../../../shared/ipc-contract'
+import type { PendingPrompt, SessionStatus, TranscriptMessage } from '../../../../shared/ipc-contract'
 import type { DiscoveredSession, DiscoveryAdapter } from '../../adapters'
 import {
+  classifyPromptText,
   createAgentStatusLister,
-  promptTypeFromStatus,
+  isWaitingOnUser,
+  transcriptSessionId,
   type AgentStatusEntry,
   type ListAgentStatuses
 } from '../../claude-cli/agent-status'
@@ -17,10 +19,10 @@ import { parseTranscript } from '../../claude-cli/transcript-file'
 
 const execFileAsync = promisify(execFile)
 
-// Claude Code writes one transcript file per session, named by the CLI's own
-// session id, under a directory tree rooted here - the only place a
-// session's working directory can be recovered from, since `claude agents
-// --json --all` reports id/pid/status but not cwd (see agent-status.ts).
+// Claude Code writes one transcript file per session, named by the session's
+// full UUID, under a directory tree rooted here - the only place a session's
+// working directory can be recovered from, since `claude agents --json --all`
+// reports id/sessionId/state but not cwd (see agent-status.ts).
 const DEFAULT_TRANSCRIPTS_ROOT_DIR = join(homedir(), '.claude', 'projects')
 
 // Tried in order against the Project root to find something to diff a
@@ -58,6 +60,25 @@ async function buildTranscriptIndex(rootDir: string): Promise<Map<string, string
 
   await walk(rootDir)
   return index
+}
+
+// Finds a session's transcript path in the index. The transcript file is named
+// by the full session UUID, but callers may only have the short CLI `id` (the
+// first hyphen-delimited segment of that UUID) - e.g. the id scraped from
+// `claude … --bg`'s output. So try an exact match first, then a unique
+// prefix match on `<id>-…`. A prefix that matches more than one file is
+// ambiguous and yields nothing rather than a wrong guess.
+function findTranscriptPath(index: Map<string, string>, id: string): string | undefined {
+  const exact = index.get(id)
+  if (exact) return exact
+
+  let match: string | undefined
+  for (const [key, path] of index) {
+    if (!key.startsWith(`${id}-`)) continue
+    if (match) return undefined
+    match = path
+  }
+  return match
 }
 
 // A transcript's cwd lives in the first line's metadata, but a long-running
@@ -128,27 +149,19 @@ async function resolveBaseRef(cwd: string): Promise<string> {
   }
 }
 
-function classify(entry: AgentStatusEntry): { status: SessionStatus; promptType: PendingPromptType | null } {
-  const promptType = promptTypeFromStatus(entry)
-  if (promptType) {
-    return {
-      status: promptType === 'permission' ? 'waiting-on-permission' : 'waiting-on-input',
-      promptType
-    }
-  }
-  return { status: entry.status === 'idle' ? 'idle' : 'running', promptType: null }
-}
-
+// The rendered prompt of a waiting session, with its kind classified from the
+// dialog text (the CLI no longer tags permission vs input via `waitingFor`).
+// Returns undefined for a non-waiting session or when the text can't be read.
 async function resolvePendingPrompt(
   command: string,
-  sessionId: string,
-  promptType: PendingPromptType
+  cliId: string,
+  waitingFor: string | undefined
 ): Promise<PendingPrompt | undefined> {
   try {
-    const { stdout } = await execFileAsync(command, ['logs', sessionId])
+    const { stdout } = await execFileAsync(command, ['logs', cliId])
     const lines = await renderScreen(stdout)
     const text = extractPromptText(lines)
-    return text ? { type: promptType, text } : undefined
+    return text ? { type: classifyPromptText(text, waitingFor), text } : undefined
   } catch {
     // A transient `claude logs` failure just means this scan reports the
     // session without prompt text yet - a later scan can still fill it in.
@@ -170,10 +183,17 @@ export function createRealDiscoveryAdapter(
     cwd: string
   ): Promise<Pick<DiscoveredSession, 'branch' | 'baseRef' | 'status' | 'pendingPrompt'>> {
     const [branch, baseRef] = await Promise.all([resolveBranch(cwd), resolveBaseRef(cwd)])
-    const { status, promptType } = classify(entry)
-    const pendingPrompt = promptType ? await resolvePendingPrompt(command, entry.id, promptType) : undefined
 
-    return { branch, baseRef, status, pendingPrompt }
+    if (isWaitingOnUser(entry)) {
+      // The prompt's kind (permission vs input) comes from its dialog text, so
+      // let the fetched prompt drive the status rather than guessing first.
+      const pendingPrompt = await resolvePendingPrompt(command, entry.id, entry.waitingFor)
+      const status: SessionStatus = pendingPrompt?.type === 'permission' ? 'waiting-on-permission' : 'waiting-on-input'
+      return { branch, baseRef, status, pendingPrompt }
+    }
+
+    const status: SessionStatus = entry.status === 'idle' ? 'idle' : 'running'
+    return { branch, baseRef, status, pendingPrompt: undefined }
   }
 
   return {
@@ -197,7 +217,8 @@ export function createRealDiscoveryAdapter(
           // Discovery only surfaces sessions that are actually alive.
           if (entry.id === undefined || entry.pid === undefined) return null
 
-          const transcriptPath = transcriptIndex.get(entry.id)
+          const cliSessionId = transcriptSessionId(entry) ?? entry.id
+          const transcriptPath = findTranscriptPath(transcriptIndex, cliSessionId)
           const cwd = transcriptPath ? await readTranscriptCwd(transcriptPath) : null
           if (!cwd) return null
 
@@ -205,7 +226,7 @@ export function createRealDiscoveryAdapter(
           if (!projectPath) return null
 
           const details = await resolveSessionDetails({ ...entry, id: entry.id }, cwd)
-          return { pid: entry.pid, cwd, projectPath, cliSessionId: entry.id, ...details }
+          return { pid: entry.pid, cwd, projectPath, cliSessionId, ...details }
         })
       )
 
@@ -227,14 +248,16 @@ export function createRealDiscoveryAdapter(
       if (!projectPath) return null
 
       const details = await resolveSessionDetails({ ...entry, id: entry.id }, directory)
-      return { pid, cwd: directory, projectPath, cliSessionId: entry.id, ...details }
+      return { pid, cwd: directory, projectPath, cliSessionId: transcriptSessionId(entry) ?? entry.id, ...details }
     },
 
     async readTranscript(cliSessionId: string): Promise<TranscriptMessage[]> {
-      // The transcript file is named <cliSessionId>.jsonl, but nested under a
+      // The transcript file is named <full session UUID>.jsonl, nested under a
       // per-cwd directory whose name we can't reconstruct losslessly - so find
-      // it by id via the same tree walk scan() uses.
-      const transcriptPath = (await buildTranscriptIndex(transcriptsRootDir)).get(cliSessionId)
+      // it by id via the same tree walk scan() uses. A session spawned by Orca
+      // only knows the short CLI id (the UUID's first segment), which
+      // findTranscriptPath resolves to the full-UUID file by prefix.
+      const transcriptPath = findTranscriptPath(await buildTranscriptIndex(transcriptsRootDir), cliSessionId)
       if (!transcriptPath) return []
       try {
         return parseTranscript(await readFile(transcriptPath, 'utf-8'))

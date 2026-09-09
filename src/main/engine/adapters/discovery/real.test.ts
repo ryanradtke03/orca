@@ -90,20 +90,21 @@ describe('createRealDiscoveryAdapter', () => {
     expect(discovered.status).toBe('idle')
   })
 
-  it('resolves a waiting-on-permission session, including its prompt text from `claude logs`', async () => {
+  it('resolves a waiting-on-permission session, classifying its prompt from `claude logs`', async () => {
     await writeTranscript('session-1', projectPath)
+    // state: 'blocked' is the CLI's "waiting on the user" signal; the kind is
+    // classified from the rendered dialog (no waitingFor on the current CLI).
     writeFakeCliState([
       {
         id: 'session-1',
         pid: 4242,
-        status: 'waiting',
-        waitingFor: 'permission prompt',
+        status: 'idle',
         processState: 'blocked',
         screen: 'Bash command\r\n\r\n  npm install\r\n\r\nDo you want to proceed?\r\n❯ 1. Yes\r\n  2. No\r\n'
       }
     ])
     const listAgentStatuses = async (): Promise<AgentStatusEntry[]> => [
-      { id: 'session-1', pid: 4242, status: 'waiting', waitingFor: 'permission prompt' }
+      { id: 'session-1', pid: 4242, status: 'idle', state: 'blocked' }
     ]
     const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
 
@@ -122,14 +123,13 @@ describe('createRealDiscoveryAdapter', () => {
       {
         id: 'session-1',
         pid: 4242,
-        status: 'waiting',
-        waitingFor: 'input needed',
+        status: 'idle',
         processState: 'blocked',
         screen: 'Which auth approach should I use?\r\n❯ 1. OAuth\r\n  2. API key\r\n'
       }
     ])
     const listAgentStatuses = async (): Promise<AgentStatusEntry[]> => [
-      { id: 'session-1', pid: 4242, status: 'waiting', waitingFor: 'input needed' }
+      { id: 'session-1', pid: 4242, status: 'idle', state: 'blocked' }
     ]
     const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
 
@@ -139,6 +139,24 @@ describe('createRealDiscoveryAdapter', () => {
     expect(discovered.pendingPrompt).toEqual({
       type: 'input',
       text: expect.stringContaining('Which auth approach')
+    })
+  })
+
+  it('locates a session transcript filed under the full UUID from its short CLI id', async () => {
+    // The CLI files the transcript under the full session UUID but reports a
+    // short `id` (the UUID's first segment); scan must still find the cwd.
+    await writeTranscript('a49b4cbc-48c4-4943-9d2c-b67619c50be6', projectPath)
+    const listAgentStatuses = async (): Promise<AgentStatusEntry[]> => [
+      { id: 'a49b4cbc', sessionId: 'a49b4cbc-48c4-4943-9d2c-b67619c50be6', pid: 4242, status: 'busy' }
+    ]
+    const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir, listAgentStatuses)
+
+    const [discovered] = await adapter.scan()
+
+    expect(discovered).toMatchObject({
+      cwd: projectPath,
+      cliSessionId: 'a49b4cbc-48c4-4943-9d2c-b67619c50be6',
+      status: 'running'
     })
   })
 
@@ -293,6 +311,29 @@ describe('createRealDiscoveryAdapter', () => {
         { role: 'user', text: 'add a readme' },
         { role: 'assistant', text: 'Done.' }
       ])
+    })
+
+    it('resolves the full-UUID transcript file from a short CLI id prefix', async () => {
+      await writeTranscriptLines('a49b4cbc-48c4-4943-9d2c-b67619c50be6', [
+        { type: 'user', uuid: 'u1', message: { role: 'user', content: 'hi' } },
+        { type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } }
+      ])
+      const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir)
+
+      const transcript = await adapter.readTranscript('a49b4cbc')
+      expect(transcript.map((message) => message.text)).toEqual(['hi', 'hello'])
+    })
+
+    it('does not guess when a short id prefix matches more than one transcript', async () => {
+      await writeTranscriptLines('a49b4cbc-1111-4943-9d2c-b67619c50be6', [
+        { type: 'user', uuid: 'u1', message: { role: 'user', content: 'one' } }
+      ])
+      await writeTranscriptLines('a49b4cbc-2222-4943-9d2c-b67619c50be6', [
+        { type: 'user', uuid: 'u2', message: { role: 'user', content: 'two' } }
+      ])
+      const adapter = createRealDiscoveryAdapter(FAKE_CLI, transcriptsRootDir)
+
+      await expect(adapter.readTranscript('a49b4cbc')).resolves.toEqual([])
     })
 
     it('returns an empty history when no transcript file exists for the id', async () => {
