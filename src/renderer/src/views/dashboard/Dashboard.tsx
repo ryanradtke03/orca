@@ -13,6 +13,7 @@ export function Dashboard({
   onOpenDiff,
   onStopSession,
   onNewSession,
+  onRespondToPrompt,
   onOpenAdopt
 }: {
   projects: Project[]
@@ -23,6 +24,7 @@ export function Dashboard({
   onOpenDiff: (sessionId: string) => void
   onStopSession: (sessionId: string) => void
   onNewSession: (projectId: string) => void
+  onRespondToPrompt: (sessionId: string, response: string) => void
   onOpenAdopt: () => void
 }): React.JSX.Element {
   const groups = groupSessionsByProject(projects, sessions)
@@ -52,6 +54,7 @@ export function Dashboard({
           onOpenDiff={onOpenDiff}
           onStopSession={onStopSession}
           onNewSession={onNewSession}
+          onRespondToPrompt={onRespondToPrompt}
           onOpenAdopt={onOpenAdopt}
         />
       )}

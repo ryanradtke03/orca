@@ -1,7 +1,15 @@
+import { useState } from 'react'
 import type { Project, Session } from '../../../../shared/ipc-contract'
+import { describeError } from '../../describe-error'
 import { useDiff } from '../../hooks/useDiff'
 import { useTranscript } from '../../hooks/useTranscript'
-import { canViewDiff, describeStatusPhrase, isStoppable, type DetailSession } from '../../view-models/session'
+import {
+  canSendMessage,
+  canViewDiff,
+  describeStatusPhrase,
+  isStoppable,
+  type DetailSession
+} from '../../view-models/session'
 import { messagesToEntries, type TranscriptEntry } from '../../view-models/transcript'
 import { ChatPane } from './ChatPane'
 import { Composer } from './Composer'
@@ -85,7 +93,8 @@ export function SessionScreen({
   onOpenSession,
   onOpenDiff,
   onStopSession,
-  onNewSession
+  onNewSession,
+  onRespondToPrompt
 }: {
   sessionId: string
   sessions: Session[]
@@ -95,6 +104,8 @@ export function SessionScreen({
   onOpenDiff: (sessionId: string) => void
   onStopSession: (sessionId: string) => void
   onNewSession: (projectId: string) => void
+  /** Answers a prompt / sends a reply; throws for a `running` session, so this handles the rejection. */
+  onRespondToPrompt: (sessionId: string, response: string) => Promise<void>
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId) as DetailSession | undefined
 
@@ -102,8 +113,9 @@ export function SessionScreen({
   // Both load once per sessionId (not on every status-poll tick). Either
   // initial-load failure errors the whole screen.
   const { files, loadError: diffError } = useDiff(sessionId)
-  const { messages, loadError: transcriptError } = useTranscript(sessionId)
+  const { messages, loadError: transcriptError, refresh: refreshTranscript } = useTranscript(sessionId)
   const loadError = diffError ?? transcriptError
+  const [sendError, setSendError] = useState('')
 
   if (!session) {
     return <SessionShell onBack={onBack}>Failed to load session: Unknown session: {sessionId}</SessionShell>
@@ -124,6 +136,24 @@ export function SessionScreen({
   // back to the plain polled messages (live mode).
   const entries: TranscriptEntry[] = session.transcript ?? messagesToEntries(messages)
 
+  // A composer send or an in-thread permission answer both route here. The
+  // engine appends the sent message to its own transcript, so on success we
+  // refresh at once rather than waiting up to ~2s for the next poll. A rejection
+  // (e.g. the session flipped to `running`) surfaces inline and keeps the input.
+  const respond = async (response: string): Promise<boolean> => {
+    try {
+      await onRespondToPrompt(session.id, response)
+      setSendError('')
+      refreshTranscript()
+      return true
+    } catch (error) {
+      const message = `Failed to send: ${describeError(error)}`
+      console.error(message, error)
+      setSendError(message)
+      return false
+    }
+  }
+
   return (
     <div id="session-screen" className="flex h-screen w-full">
       <SessionNav
@@ -143,8 +173,13 @@ export function SessionScreen({
           onViewDiff={() => onOpenDiff(session.id)}
           onStop={() => onStopSession(session.id)}
         />
-        <ChatPane entries={entries} />
-        <Composer queuedCount={session.queuedPrompts?.length ?? 0} />
+        <ChatPane entries={entries} onRespond={(response) => void respond(response)} />
+        <Composer
+          queuedCount={session.queuedPrompts?.length ?? 0}
+          canSend={canSendMessage(session.status)}
+          error={sendError}
+          onSend={respond}
+        />
       </main>
       <Inspector session={session} files={files} mergeMode={project?.mergeMode} />
     </div>
