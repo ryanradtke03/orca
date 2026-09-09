@@ -110,6 +110,22 @@ describe('createMockOrca mutations keep the clickthrough consistent', () => {
     expect(answered.pendingPrompt).toBeUndefined()
   })
 
+  it('adoptSession adds a session for an untracked pid', async () => {
+    const { api } = createMockOrca()
+    const before = await api.listSessions()
+    const adopted = await api.adoptSession(7777, '/work/adopted')
+    expect(adopted.pid).toBe(7777)
+    expect(adopted.worktreePath).toBe('/work/adopted')
+    const after = await api.listSessions()
+    expect(after).toHaveLength(before.length + 1)
+  })
+
+  it('adoptSession rejects a pid that is already tracked and active', async () => {
+    const { api } = createMockOrca()
+    const active = (await api.listSessions()).find((session) => session.status === 'running')!
+    await expect(api.adoptSession(active.pid, '/work/adopted')).rejects.toThrow(/already tracked/)
+  })
+
   it('rejects operations on an unknown session', async () => {
     const { api } = createMockOrca()
     await expect(api.getDiff('does-not-exist')).rejects.toThrow()

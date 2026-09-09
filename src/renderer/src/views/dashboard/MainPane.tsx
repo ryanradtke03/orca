@@ -11,7 +11,8 @@ export function MainPane({
   onOpenSession,
   onOpenDiff,
   onStopSession,
-  onNewSession
+  onNewSession,
+  onOpenAdopt
 }: {
   sessions: Session[]
   groups: ProjectSessionGroup[]
@@ -21,6 +22,7 @@ export function MainPane({
   onOpenDiff: (sessionId: string) => void
   onStopSession: (sessionId: string) => void
   onNewSession: (projectId: string) => void
+  onOpenAdopt: () => void
 }): React.JSX.Element {
   const stats = summarizeStatuses(sessions)
   // The global "New session" spawns into the first project - MainPane only
@@ -37,10 +39,10 @@ export function MainPane({
           </h1>
           <div className="mt-[5px] font-mono text-[11px] text-tertiary">{stats || 'No sessions yet'}</div>
         </div>
-        {/* Adopt session is still a visual-only no-op (separate ticket - net-new
-            UI, not a wire). New session spawns a bare idle session (#57). */}
+        {/* Adopt session opens a form for pid + directory (#58); New session
+            spawns a bare idle session (#57). */}
         <div className="flex flex-none items-center gap-2.5">
-          <button type="button" className="btn-ghost">
+          <button type="button" className="btn-ghost" onClick={onOpenAdopt}>
             Adopt session
           </button>
           <button

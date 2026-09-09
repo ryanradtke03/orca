@@ -8,6 +8,7 @@ import { useSessionPoll } from './hooks/useSessionPoll'
 import { isMockMode } from './mock'
 import { MockDevToolbar } from './mock/MockDevToolbar'
 import { ModeBadge } from './components/ModeBadge'
+import { AdoptSessionModal } from './components/AdoptSessionModal'
 
 type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type: 'session'; sessionId: string }
 
@@ -15,6 +16,7 @@ export function App(): React.JSX.Element {
   const { projects, sessions, refreshAll, applySession, loadError } = useSessionPoll()
   const [view, setView] = useState<View>({ type: 'dashboard' })
   const [statusMessage, setStatusMessage] = useState('')
+  const [adoptOpen, setAdoptOpen] = useState(false)
 
   const openSession = (sessionId: string): void => setView({ type: 'session', sessionId })
   const openDiff = (sessionId: string): void => setView({ type: 'diff', sessionId })
@@ -58,6 +60,14 @@ export function App(): React.JSX.Element {
     }
   }
 
+  // The happy path only: adopt the session and reflect it optimistically. The
+  // AdoptSessionModal owns validation and inline error display, so failures
+  // reject back to it (staying open) rather than being swallowed here.
+  async function handleAdoptSession(pid: number, directory: string): Promise<void> {
+    applySession(await orca.adoptSession(pid, directory))
+    setStatusMessage('')
+  }
+
   let content: React.JSX.Element
   if (view.type === 'diff') {
     content = (
@@ -87,6 +97,7 @@ export function App(): React.JSX.Element {
         onOpenDiff={openDiff}
         onStopSession={handleStopSession}
         onNewSession={handleNewSession}
+        onOpenAdopt={() => setAdoptOpen(true)}
       />
     )
   }
@@ -94,6 +105,7 @@ export function App(): React.JSX.Element {
   return (
     <>
       {content}
+      {adoptOpen && <AdoptSessionModal onAdopt={handleAdoptSession} onClose={() => setAdoptOpen(false)} />}
       <ModeBadge />
       {/* Dev-only Home populated/empty toggle - mock mode only (ticket #49). */}
       {isMockMode() && <MockDevToolbar onToggle={() => void refreshAll()} />}

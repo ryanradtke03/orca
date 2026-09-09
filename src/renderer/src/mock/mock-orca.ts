@@ -9,6 +9,7 @@ import type {
 } from '../../../shared/ipc-contract'
 import { BASE_REF, cloneFixtures, MOCK_PROJECTS, type MockSessionFixture } from './fixtures'
 import type { MockSession } from './placeholder-types'
+import { isTerminalStatus } from '../view-models/session'
 
 /** Dev-only controls the mock exposes on top of the real OrcaApi surface. */
 export interface MockControls {
@@ -168,6 +169,12 @@ export function createMockOrca(): MockOrca {
     },
 
     async adoptSession(pid: number, directory: string): Promise<Session> {
+      // Mirror the engine's guard so the "already tracked" error path is
+      // reachable in mock mode too - a pid already backing an active session
+      // can't be adopted again.
+      if (fixtures.some((fixture) => fixture.session.pid === pid && !isTerminalStatus(fixture.session.status))) {
+        throw new Error(`Session already tracked: pid ${pid}`)
+      }
       return addFixture(
         newBlankFixture({
           id: `sess-adopt-${pid}`,
