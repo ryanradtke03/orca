@@ -870,6 +870,40 @@ describe('Engine.getTranscript', () => {
     ])
   })
 
+  it('still shows a re-sent message whose text repeats an earlier flushed turn', async () => {
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+
+    const spawned = await engine.spawnSession('project-1')
+
+    // First "continue" is sent and the CLI flushes it (plus a reply), then asks
+    // a follow-up so the session can take another message.
+    await engine.respondToPrompt(spawned.id, 'continue')
+    discovery.simulateTranscript(`cli-${spawned.pid}`, [
+      { id: 'f1', role: 'user', text: 'continue', timestamp: 1 },
+      { id: 'f2', role: 'assistant', text: 'ok, continuing', timestamp: 2 }
+    ])
+    processAdapter.simulatePrompt(spawned.pid, { type: 'input', text: 'again?' })
+    await engine.refreshSessionStatuses()
+
+    // The user re-sends the same text; it isn't on disk yet. The freshly-sent
+    // copy must still appear - only the earlier, already-flushed "continue" is
+    // suppressed (the bug was a global role+text match dropping both).
+    await engine.respondToPrompt(spawned.id, 'continue')
+
+    const transcript = await engine.getTranscript(spawned.id)
+    expect(transcript.map((message) => ({ role: message.role, text: message.text }))).toEqual([
+      { role: 'user', text: 'continue' },
+      { role: 'assistant', text: 'ok, continuing' },
+      { role: 'user', text: 'continue' }
+    ])
+  })
+
   it('reads the transcript of a discovered session it never spawned', async () => {
     const persistence = createFakePersistenceAdapter({ projects: seeded })
     const git = createFakeGitAdapter()

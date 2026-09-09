@@ -471,14 +471,28 @@ export function createEngine(adapters: EngineAdapters): Engine {
     const cliSessionId = cliSessionIds.get(sessionId)
     const parsed = cliSessionId ? await adapters.discovery.readTranscript(cliSessionId) : []
 
-    // Overlay any Orca-sent user messages the transcript file hasn't caught up
-    // to yet, so a just-sent message shows without waiting for the next poll.
-    // De-duplicated by role+text: once the CLI writes a message through, the
-    // parsed copy wins and the local one is dropped.
-    const seen = new Set(parsed.map((message) => `${message.role}\n${message.text}`))
-    const pendingLocal = (localMessages.get(sessionId) ?? []).filter(
-      (message) => !seen.has(`${message.role}\n${message.text}`)
-    )
+    // Overlay any Orca-sent messages the transcript file hasn't caught up to
+    // yet, so a just-sent message shows without waiting for the next poll. Once
+    // the CLI flushes a message through, the parsed copy wins and the local one
+    // is dropped. Matching consumes one parsed occurrence per local message
+    // (rather than a plain role+text membership test) so that re-sending a
+    // phrase that already appears earlier in the history - "yes", "continue" -
+    // still shows the new send immediately, and only the already-flushed
+    // occurrence is suppressed.
+    const flushedCounts = new Map<string, number>()
+    for (const message of parsed) {
+      const key = `${message.role}\n${message.text}`
+      flushedCounts.set(key, (flushedCounts.get(key) ?? 0) + 1)
+    }
+    const pendingLocal = (localMessages.get(sessionId) ?? []).filter((message) => {
+      const key = `${message.role}\n${message.text}`
+      const flushed = flushedCounts.get(key) ?? 0
+      if (flushed > 0) {
+        flushedCounts.set(key, flushed - 1)
+        return false
+      }
+      return true
+    })
 
     return [...parsed, ...pendingLocal]
   }
