@@ -9,7 +9,10 @@ export function MainPane({
   attention,
   projectNameFor,
   onOpenSession,
-  onOpenDiff
+  onOpenDiff,
+  onStopSession,
+  onNewSession,
+  onOpenAdopt
 }: {
   sessions: Session[]
   groups: ProjectSessionGroup[]
@@ -17,8 +20,15 @@ export function MainPane({
   projectNameFor: (projectId: string) => string
   onOpenSession: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
+  onStopSession: (sessionId: string) => void
+  onNewSession: (projectId: string) => void
+  onOpenAdopt: () => void
 }): React.JSX.Element {
   const stats = summarizeStatuses(sessions)
+  // The global "New session" spawns into the first project - MainPane only
+  // renders when at least one project exists (Dashboard shows EmptyState
+  // otherwise), so this is always defined.
+  const firstProjectId = groups[0]?.project.id
 
   return (
     <main id="main" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
@@ -29,13 +39,18 @@ export function MainPane({
           </h1>
           <div className="mt-[5px] font-mono text-[11px] text-tertiary">{stats || 'No sessions yet'}</div>
         </div>
-        {/* Header actions are still visual-only no-ops - wiring New session /
-            Adopt session to real IPC is deferred (ticket #50). */}
+        {/* Adopt session opens a form for pid + directory (#58); New session
+            spawns a bare idle session (#57). */}
         <div className="flex flex-none items-center gap-2.5">
-          <button type="button" className="btn-ghost">
+          <button type="button" className="btn-ghost" onClick={onOpenAdopt}>
             Adopt session
           </button>
-          <button type="button" className="btn">
+          <button
+            type="button"
+            className="btn"
+            disabled={firstProjectId === undefined}
+            onClick={() => firstProjectId !== undefined && onNewSession(firstProjectId)}
+          >
             New session
           </button>
         </div>
@@ -45,7 +60,13 @@ export function MainPane({
 
       <div className="pb-6">
         {groups.map((group) => (
-          <ProjectGroup key={group.project.id} group={group} onOpenSession={onOpenSession} onOpenDiff={onOpenDiff} />
+          <ProjectGroup
+            key={group.project.id}
+            group={group}
+            onOpenSession={onOpenSession}
+            onOpenDiff={onOpenDiff}
+            onStopSession={onStopSession}
+          />
         ))}
       </div>
     </main>

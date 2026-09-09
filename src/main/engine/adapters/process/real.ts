@@ -159,7 +159,7 @@ export function createRealProcessAdapter(
       const pid = await resolvePid(id)
 
       sessions.set(pid, { id, pid, alive: true, exitCode: null, pendingPrompt: null })
-      return { pid }
+      return { pid, cliSessionId: id }
     },
 
     async stop(pid: number): Promise<void> {

@@ -4,11 +4,13 @@ import { SessionRow } from './SessionRow'
 export function ProjectGroup({
   group,
   onOpenSession,
-  onOpenDiff
+  onOpenDiff,
+  onStopSession
 }: {
   group: ProjectSessionGroup
   onOpenSession: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
+  onStopSession: (sessionId: string) => void
 }): React.JSX.Element {
   return (
     <>
@@ -30,6 +32,7 @@ export function ProjectGroup({
               projectName={group.project.name}
               onOpen={onOpenSession}
               onOpenDiff={onOpenDiff}
+              onStop={onStopSession}
             />
           ))
         )}

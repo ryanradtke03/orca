@@ -28,7 +28,9 @@ export function createFakeProcessAdapter(seed: { pid?: number } = {}): FakeProce
       const pid = seed.pid ?? 1000 + counter
       processes.set(pid, { alive: true, exitCode: null, pendingPrompt: null })
       spawnedCwds.push(cwd)
-      return { pid }
+      // A stable, pid-derived stand-in for the CLI's own session id, so tests
+      // and the demo can correlate a spawned session with a seeded transcript.
+      return { pid, cliSessionId: `cli-${pid}` }
     },
 
     async stop(pid: number): Promise<void> {

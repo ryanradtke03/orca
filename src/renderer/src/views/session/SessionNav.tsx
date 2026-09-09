@@ -73,7 +73,8 @@ export function SessionNav({
   currentProjectName,
   currentSessionId,
   projectNameFor,
-  onOpenSession
+  onOpenSession,
+  onNewSession
 }: {
   sessions: DetailSession[]
   currentProjectId: string
@@ -81,6 +82,7 @@ export function SessionNav({
   currentSessionId: string
   projectNameFor: (projectId: string) => string
   onOpenSession: (sessionId: string) => void
+  onNewSession: (projectId: string) => void
 }): React.JSX.Element {
   const { needsYou, active, recent } = bucketSessionsForNav(sessions, currentProjectId)
   const projectSessionCount = sessions.filter((session) => session.projectId === currentProjectId).length
@@ -94,11 +96,12 @@ export function SessionNav({
             {currentProjectName} · {projectSessionCount} sessions
           </div>
         </div>
-        {/* New-session affordance - inert for now (ticket #51). */}
+        {/* New-session affordance - spawns a bare idle session in this project (#57). */}
         <button
           type="button"
           className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-md border border-dashed border-white/28 text-[13px] leading-none text-faint hover:border-white/70 hover:text-primary"
           aria-label="New session"
+          onClick={() => onNewSession(currentProjectId)}
         >
           +
         </button>

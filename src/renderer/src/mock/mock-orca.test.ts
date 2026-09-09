@@ -88,6 +88,19 @@ describe('createMockOrca mutations keep the clickthrough consistent', () => {
     expect(after.status).toBe('stopped')
   })
 
+  it('spawnSession adds a bare idle session to the project', async () => {
+    const { api } = createMockOrca()
+    const projects = await api.listProjects()
+    const before = await api.listSessions()
+    const spawned = await api.spawnSession(projects[0].id)
+    expect(spawned.status).toBe('idle')
+    expect(spawned.projectId).toBe(projects[0].id)
+    expect(spawned.pendingPrompt).toBeUndefined()
+    const after = await api.listSessions()
+    expect(after).toHaveLength(before.length + 1)
+    expect(after.some((session) => session.id === spawned.id)).toBe(true)
+  })
+
   it('respondToPrompt clears a pending permission prompt', async () => {
     const { api } = createMockOrca()
     const waiting = (await api.listSessions()).find(
@@ -95,6 +108,22 @@ describe('createMockOrca mutations keep the clickthrough consistent', () => {
     )!
     const answered = await api.respondToPrompt(waiting.id, 'approve')
     expect(answered.pendingPrompt).toBeUndefined()
+  })
+
+  it('adoptSession adds a session for an untracked pid', async () => {
+    const { api } = createMockOrca()
+    const before = await api.listSessions()
+    const adopted = await api.adoptSession(7777, '/work/adopted')
+    expect(adopted.pid).toBe(7777)
+    expect(adopted.worktreePath).toBe('/work/adopted')
+    const after = await api.listSessions()
+    expect(after).toHaveLength(before.length + 1)
+  })
+
+  it('adoptSession rejects a pid that is already tracked and active', async () => {
+    const { api } = createMockOrca()
+    const active = (await api.listSessions()).find((session) => session.status === 'running')!
+    await expect(api.adoptSession(active.pid, '/work/adopted')).rejects.toThrow(/already tracked/)
   })
 
   it('rejects operations on an unknown session', async () => {

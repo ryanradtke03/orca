@@ -1,4 +1,10 @@
-export function EmptyState({ onAddProject }: { onAddProject: () => void }): React.JSX.Element {
+export function EmptyState({
+  onAddProject,
+  onAdoptSession
+}: {
+  onAddProject: () => void
+  onAdoptSession: () => void
+}): React.JSX.Element {
   return (
     <div className="flex flex-1 items-center justify-center p-10">
       <div className="max-w-[520px] text-center">
@@ -16,8 +22,7 @@ export function EmptyState({ onAddProject }: { onAddProject: () => void }): Reac
           <button type="button" className="btn px-5 py-[11px] text-[12.5px]" onClick={onAddProject}>
             Add project…
           </button>
-          {/* Inert no-op - wiring adopt-from-empty to real IPC is deferred (ticket #50). */}
-          <button type="button" className="btn-ghost px-5 py-[11px] text-[12.5px]">
+          <button type="button" className="btn-ghost px-5 py-[11px] text-[12.5px]" onClick={onAdoptSession}>
             Adopt a running session
           </button>
         </div>

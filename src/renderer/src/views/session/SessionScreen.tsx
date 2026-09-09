@@ -1,7 +1,7 @@
 import type { Project, Session } from '../../../../shared/ipc-contract'
 import { useDiff } from '../../hooks/useDiff'
 import { useTranscript } from '../../hooks/useTranscript'
-import { canViewDiff, describeStatusPhrase, type DetailSession } from '../../view-models/session'
+import { canViewDiff, describeStatusPhrase, isStoppable, type DetailSession } from '../../view-models/session'
 import { messagesToEntries, type TranscriptEntry } from '../../view-models/transcript'
 import { ChatPane } from './ChatPane'
 import { Composer } from './Composer'
@@ -20,13 +20,18 @@ function SessionHeader({
   session,
   projectName,
   onBack,
-  onViewDiff
+  onViewDiff,
+  onStop
 }: {
   session: DetailSession
   projectName: string
   onBack: () => void
   onViewDiff: () => void
+  onStop: () => void
 }): React.JSX.Element {
+  // Stop only applies to a still-alive session; disable it once the session is
+  // terminal so a guaranteed-to-error click isn't offered.
+  const stoppable = isStoppable(session.status)
   return (
     <div className="flex items-center gap-4 border-b border-border-soft px-6 py-4">
       <BackButton onBack={onBack} />
@@ -46,8 +51,12 @@ function SessionHeader({
           View diff
         </button>
       )}
-      {/* Stop is inert for now (ticket #51) - wiring session actions is a later ticket. */}
-      <button type="button" className="btn px-[15px] py-2 text-[11.5px]">
+      <button
+        type="button"
+        className="btn px-[15px] py-2 text-[11.5px] disabled:pointer-events-none disabled:opacity-40"
+        disabled={!stoppable}
+        onClick={onStop}
+      >
         Stop
       </button>
     </div>
@@ -74,7 +83,9 @@ export function SessionScreen({
   projects,
   onBack,
   onOpenSession,
-  onOpenDiff
+  onOpenDiff,
+  onStopSession,
+  onNewSession
 }: {
   sessionId: string
   sessions: Session[]
@@ -82,6 +93,8 @@ export function SessionScreen({
   onBack: () => void
   onOpenSession: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
+  onStopSession: (sessionId: string) => void
+  onNewSession: (projectId: string) => void
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId) as DetailSession | undefined
 
@@ -120,6 +133,7 @@ export function SessionScreen({
         currentSessionId={session.id}
         projectNameFor={projectNameFor}
         onOpenSession={onOpenSession}
+        onNewSession={onNewSession}
       />
       <main id="session-main" className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <SessionHeader
@@ -127,6 +141,7 @@ export function SessionScreen({
           projectName={projectName}
           onBack={onBack}
           onViewDiff={() => onOpenDiff(session.id)}
+          onStop={() => onStopSession(session.id)}
         />
         <ChatPane entries={entries} />
         <Composer queuedCount={session.queuedPrompts?.length ?? 0} />

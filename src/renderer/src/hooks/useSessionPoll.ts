@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Project, Session } from '../../../shared/ipc-contract'
 import { orca } from '../api/orca-client'
 import { describeError } from '../describe-error'
+import { upsertSession } from '../view-models/session'
 
 const SESSION_STATUS_POLL_INTERVAL_MS = 2000
 
@@ -12,6 +13,8 @@ export interface SessionPoll {
   refreshAll: () => Promise<void>
   /** Re-fetches sessions only - used after an action that only changes session state (stop, respond, merge, discard). */
   refreshSessions: () => Promise<void>
+  /** Applies a single engine-returned Session (from a mutation like stop/spawn) to local state at once, ahead of the next poll tick. */
+  applySession: (session: Session) => void
   loadError: string
 }
 
@@ -54,6 +57,12 @@ export function useSessionPoll(): SessionPoll {
     }
   }, [])
 
+  // Optimistic update: reflect a mutation's returned Session immediately rather
+  // than waiting up to ~2s for the next refreshSessions tick to reconcile it.
+  const applySession = useCallback((session: Session) => {
+    setSessions((prev) => upsertSession(prev, session))
+  }, [])
+
   useEffect(() => {
     void refreshAll()
     const interval = setInterval(() => void refreshSessions(), SESSION_STATUS_POLL_INTERVAL_MS)
@@ -61,5 +70,5 @@ export function useSessionPoll(): SessionPoll {
     // Only ever set up once - refreshAll/refreshSessions are stable (useCallback with no deps).
   }, [])
 
-  return { projects, sessions, refreshAll, refreshSessions, loadError }
+  return { projects, sessions, refreshAll, refreshSessions, applySession, loadError }
 }

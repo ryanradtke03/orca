@@ -1,4 +1,4 @@
-import type { DiscoveredSession, DiscoveryAdapter } from '../../adapters'
+import type { DiscoveredSession, DiscoveryAdapter, TranscriptMessage } from '../../adapters'
 
 export interface FakeDiscoveryAdapter extends DiscoveryAdapter {
   // Queues a session for the next scan() to report - simulating a `claude`
@@ -11,6 +11,9 @@ export interface FakeDiscoveryAdapter extends DiscoveryAdapter {
   // reporting it - simulating the scenario Adopt exists for: a session
   // Discovery's automatic scan can't find on its own.
   simulateManualOnlySession(session: DiscoveredSession): void
+  // Seeds the message history readTranscript() returns for a CLI session id -
+  // standing in for its on-disk .jsonl transcript.
+  simulateTranscript(cliSessionId: string, messages: TranscriptMessage[]): void
 }
 
 export function createFakeDiscoveryAdapter(
@@ -18,10 +21,19 @@ export function createFakeDiscoveryAdapter(
 ): FakeDiscoveryAdapter {
   let sessions = seed.sessions ?? []
   let manualOnlySessions: DiscoveredSession[] = []
+  const transcripts = new Map<string, TranscriptMessage[]>()
 
   return {
     async scan() {
       return sessions
+    },
+
+    simulateTranscript(cliSessionId: string, messages: TranscriptMessage[]): void {
+      transcripts.set(cliSessionId, messages)
+    },
+
+    async readTranscript(cliSessionId: string): Promise<TranscriptMessage[]> {
+      return transcripts.get(cliSessionId) ?? []
     },
 
     simulateSession(session: DiscoveredSession): void {
