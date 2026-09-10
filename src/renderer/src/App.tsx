@@ -5,6 +5,7 @@ import { DiffScreen } from './views/diff/DiffScreen'
 import { SessionScreen } from './views/session/SessionScreen'
 import { describeError } from './describe-error'
 import { useSessionPoll } from './hooks/useSessionPoll'
+import { useReviewState } from './hooks/useReviewState'
 import { isMockMode } from './mock'
 import { MockDevToolbar } from './mock/MockDevToolbar'
 import { ModeBadge } from './components/ModeBadge'
@@ -14,6 +15,7 @@ type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type
 
 export function App(): React.JSX.Element {
   const { projects, sessions, refreshAll, applySession, loadError } = useSessionPoll()
+  const review = useReviewState()
   const [view, setView] = useState<View>({ type: 'dashboard' })
   const [statusMessage, setStatusMessage] = useState('')
   const [adoptOpen, setAdoptOpen] = useState(false)
@@ -93,7 +95,14 @@ export function App(): React.JSX.Element {
   let content: React.JSX.Element
   if (view.type === 'diff') {
     content = (
-      <DiffScreen sessionId={view.sessionId} sessions={sessions} projects={projects} onBack={backToDashboard} />
+      <DiffScreen
+        sessionId={view.sessionId}
+        sessions={sessions}
+        projects={projects}
+        reviewedPaths={review.reviewedPathsFor(view.sessionId)}
+        onBack={backToDashboard}
+        onToggleReviewed={review.toggleReviewed}
+      />
     )
   } else if (view.type === 'session') {
     content = (

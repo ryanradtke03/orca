@@ -2,9 +2,10 @@ import type { FileDiff } from '../../../shared/ipc-contract'
 
 /**
  * A FileDiff plus the renderer-only "has the user reviewed this file yet"
- * flag the diff mockup (04a) tracks. It rides along on the mock getDiff
- * result and is absent in live mode - so the viewer degrades to "nothing
- * reviewed yet", never breaks (ticket #49's placeholder fields).
+ * flag the diff mockup (04a) tracks. It is not part of the diff payload -
+ * applyReviewed (view-models/review.ts) stamps it from the app's per-session
+ * review state before the viewer renders, so it works identically in live and
+ * mock mode.
  */
 export type ReviewFileDiff = FileDiff & { reviewed?: boolean }
 

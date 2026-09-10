@@ -10,6 +10,7 @@ import {
   type DiffRow,
   type ReviewFileDiff
 } from '../../view-models/diff'
+import { applyReviewed } from '../../view-models/review'
 import { describeMergeMode, describeStatus } from '../../view-models/session'
 import { StatusMarker } from '../../components/StatusMarker'
 
@@ -228,10 +229,14 @@ function HunkView({ file }: { file: ReviewFileDiff }): React.JSX.Element {
 function DiffFooter({
   fileIndex,
   fileCount,
+  reviewed,
+  onMarkReviewed,
   onNextFile
 }: {
   fileIndex: number
   fileCount: number
+  reviewed: boolean
+  onMarkReviewed: () => void
   onNextFile: () => void
 }): React.JSX.Element {
   return (
@@ -240,9 +245,12 @@ function DiffFooter({
         file {fileIndex + 1} of {fileCount}
       </span>
       <div className="flex items-center gap-2">
-        {/* Mark reviewed is inert for now (ticket #52). */}
-        <button type="button" className="btn-ghost px-[15px] py-2 text-[11.5px]">
-          Mark reviewed
+        <button
+          type="button"
+          className={`btn-ghost px-[15px] py-2 text-[11.5px] ${reviewed ? 'text-primary' : ''}`}
+          onClick={onMarkReviewed}
+        >
+          {reviewed ? '✓ Reviewed' : 'Mark reviewed'}
         </button>
         <button type="button" className="btn px-[15px] py-2 text-[11.5px]" onClick={onNextFile}>
           Next file →
@@ -269,18 +277,23 @@ export function DiffScreen({
   sessionId,
   sessions,
   projects,
-  onBack
+  reviewedPaths,
+  onBack,
+  onToggleReviewed
 }: {
   sessionId: string
   sessions: Session[]
   projects: Project[]
+  reviewedPaths: readonly string[]
   onBack: () => void
+  onToggleReviewed: (sessionId: string, path: string) => void
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId)
-  // getDiff rides the per-file `reviewed` flag along in mock mode; live mode
-  // omits it and the tree degrades to "nothing reviewed yet".
+  // The `reviewed` flag is app-tracked (per session, in App), not part of the
+  // diff payload - applyReviewed stamps it onto the loaded files so the tree,
+  // counter and Mark-reviewed button all reflect the same source of truth.
   const { files: rawFiles, loadError } = useDiff(sessionId)
-  const files = rawFiles as ReviewFileDiff[] | null
+  const files = rawFiles ? applyReviewed(rawFiles, reviewedPaths) : null
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
 
   // Reset the selection when navigating to a different session's diff.
@@ -325,6 +338,8 @@ export function DiffScreen({
         <DiffFooter
           fileIndex={selectedIndex}
           fileCount={files.length}
+          reviewed={selected.reviewed ?? false}
+          onMarkReviewed={() => onToggleReviewed(sessionId, selected.path)}
           onNextFile={() => setSelectedPath(files[(selectedIndex + 1) % files.length].path)}
         />
       </main>
