@@ -29,14 +29,17 @@ export function RemoveSessionModal({
   const [submitting, setSubmitting] = useState(false)
   const discardsWorktree = removalDiscardsWorktree(session)
 
-  // Esc closes the modal, matching the usual dialog affordance.
+  // Esc closes the modal, matching the usual dialog affordance - but not while
+  // a removal is in flight, so the dialog can't unmount mid-request (which
+  // would strip the inline error and setState on an unmounted component). Cancel
+  // and the backdrop are disabled for the same reason.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && !submitting) onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [onClose, submitting])
 
   async function handleConfirm(): Promise<void> {
     setSubmitting(true)
@@ -53,7 +56,7 @@ export function RemoveSessionModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6"
-      onClick={onClose}
+      onClick={submitting ? undefined : onClose}
       role="presentation"
     >
       <div

@@ -31,6 +31,27 @@ export function useSessionPoll(): SessionPoll {
   // triggered by an action like adding a project.
   const allToken = useRef(0)
   const sessionsToken = useRef(0)
+  // Ids of sessions removed optimistically via dropSession. The tokens above
+  // only invalidate a stale response against a *newer call of the same
+  // function*; they don't help when a poll's listSessions() was already in
+  // flight when a removal landed - that response still carries the removed
+  // session and would resurrect it for ~2s. Filtering fetched lists through
+  // these tombstones closes that window. Each clears itself the first time a
+  // fetched list confirms the session is gone (see reconcile), so the set
+  // can't grow unbounded and a truly-gone session can never be re-added.
+  const removedIds = useRef<Set<string>>(new Set())
+
+  // Drops tombstoned ids from a freshly-fetched list, and forgets any tombstone
+  // the engine has now confirmed absent (so later polls needn't keep filtering).
+  const reconcile = useCallback((list: Session[]): Session[] => {
+    if (removedIds.current.size === 0) return list
+    const present = new Set(list.map((session) => session.id))
+    for (const id of removedIds.current) {
+      if (!present.has(id)) removedIds.current.delete(id)
+    }
+    if (removedIds.current.size === 0) return list
+    return list.filter((session) => !removedIds.current.has(session.id))
+  }, [])
 
   const refreshAll = useCallback(async () => {
     const token = ++allToken.current
@@ -38,26 +59,26 @@ export function useSessionPoll(): SessionPoll {
       const [nextProjects, nextSessions] = await Promise.all([orca.listProjects(), orca.listSessions()])
       if (token !== allToken.current) return
       setProjects(nextProjects)
-      setSessions(nextSessions)
+      setSessions(reconcile(nextSessions))
       setLoadError('')
     } catch (error) {
       if (token !== allToken.current) return
       setLoadError(`Failed to load projects: ${describeError(error)}`)
     }
-  }, [])
+  }, [reconcile])
 
   const refreshSessions = useCallback(async () => {
     const token = ++sessionsToken.current
     try {
       const nextSessions = await orca.listSessions()
       if (token !== sessionsToken.current) return
-      setSessions(nextSessions)
+      setSessions(reconcile(nextSessions))
       setLoadError('')
     } catch (error) {
       if (token !== sessionsToken.current) return
       setLoadError(`Failed to refresh session statuses: ${describeError(error)}`)
     }
-  }, [])
+  }, [reconcile])
 
   // Optimistic update: reflect a mutation's returned Session immediately rather
   // than waiting up to ~2s for the next refreshSessions tick to reconcile it.
@@ -66,8 +87,10 @@ export function useSessionPoll(): SessionPoll {
   }, [])
 
   // Optimistic removal: drop a just-removed session now rather than waiting for
-  // the next refreshSessions tick to observe it gone.
+  // the next refreshSessions tick to observe it gone. Tombstone the id first so
+  // a poll whose listSessions() was already in flight can't re-add it (reconcile).
   const dropSession = useCallback((sessionId: string) => {
+    removedIds.current.add(sessionId)
     setSessions((prev) => removeSessionFromState(prev, sessionId))
   }, [])
 
@@ -75,7 +98,8 @@ export function useSessionPoll(): SessionPoll {
     void refreshAll()
     const interval = setInterval(() => void refreshSessions(), SESSION_STATUS_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-    // Only ever set up once - refreshAll/refreshSessions are stable (useCallback with no deps).
+    // Only ever set up once - refreshAll/refreshSessions are stable (their only
+    // dep, reconcile, is itself a no-dep useCallback, so their identity never changes).
   }, [])
 
   return { projects, sessions, refreshAll, refreshSessions, applySession, dropSession, loadError }
