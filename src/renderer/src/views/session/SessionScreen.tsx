@@ -29,13 +29,15 @@ function SessionHeader({
   projectName,
   onBack,
   onViewDiff,
-  onStop
+  onStop,
+  onRequestRemove
 }: {
   session: DetailSession
   projectName: string
   onBack: () => void
   onViewDiff: () => void
   onStop: () => void
+  onRequestRemove: () => void
 }): React.JSX.Element {
   // Stop only applies to a still-alive session; disable it once the session is
   // terminal so a guaranteed-to-error click isn't offered.
@@ -67,6 +69,13 @@ function SessionHeader({
       >
         Stop
       </button>
+      <button
+        type="button"
+        className="btn-ghost px-[15px] py-2 text-[11.5px] hover:text-danger"
+        onClick={onRequestRemove}
+      >
+        Remove
+      </button>
     </div>
   )
 }
@@ -94,7 +103,8 @@ export function SessionScreen({
   onOpenDiff,
   onStopSession,
   onNewSession,
-  onRespondToPrompt
+  onRespondToPrompt,
+  onRequestRemove
 }: {
   sessionId: string
   sessions: Session[]
@@ -106,6 +116,8 @@ export function SessionScreen({
   onNewSession: (projectId: string) => void
   /** Answers a prompt / sends a reply; throws for a `running` session, so this handles the rejection. */
   onRespondToPrompt: (sessionId: string, response: string) => Promise<void>
+  /** Opens the Remove confirmation for this session (App owns the modal + call). */
+  onRequestRemove: (sessionId: string) => void
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId) as DetailSession | undefined
 
@@ -177,6 +189,7 @@ export function SessionScreen({
           onBack={onBack}
           onViewDiff={() => onOpenDiff(session.id)}
           onStop={() => onStopSession(session.id)}
+          onRequestRemove={() => onRequestRemove(session.id)}
         />
         <ChatPane entries={entries} onRespond={(response) => void respond(response)} />
         <Composer

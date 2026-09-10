@@ -30,5 +30,6 @@ export const orca: OrcaApi = {
   setProjectMergeMode: (projectId, mergeMode) => window.orca.setProjectMergeMode(projectId, mergeMode),
   requestMerge: (sessionId) => window.orca.requestMerge(sessionId),
   discardWorktree: (sessionId) => window.orca.discardWorktree(sessionId),
+  removeSession: (sessionId) => window.orca.removeSession(sessionId),
   adoptSession: (pid, directory) => window.orca.adoptSession(pid, directory),
 }

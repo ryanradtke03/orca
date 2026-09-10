@@ -73,6 +73,12 @@ export function createMockOrca(): MockOrca {
     return snapshot(fixture)
   }
 
+  function removeFixture(sessionId: string): void {
+    const index = fixtures.findIndex((fixture) => fixture.session.id === sessionId)
+    if (index !== -1) fixtures.splice(index, 1)
+    byId.delete(sessionId)
+  }
+
   const api: OrcaApi = {
     async ping(): Promise<PingResult> {
       return { ok: true, sessionCount: homeEmpty ? 0 : fixtures.length }
@@ -166,6 +172,13 @@ export function createMockOrca(): MockOrca {
       const fixture = requireFixture(sessionId)
       fixture.session.worktreeRemoved = true
       return snapshot(fixture)
+    },
+
+    async removeSession(sessionId: string): Promise<void> {
+      // Mirror the engine's unknown-session guard so that error path is
+      // reachable in mock mode too, then drop the fixture from every list.
+      requireFixture(sessionId)
+      removeFixture(sessionId)
     },
 
     async adoptSession(pid: number, directory: string): Promise<Session> {

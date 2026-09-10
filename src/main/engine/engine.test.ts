@@ -1580,6 +1580,93 @@ describe('Engine.discardWorktree', () => {
   })
 })
 
+describe('Engine.removeSession', () => {
+  function makeEngine() {
+    const seeded = [{ id: 'project-1', path: '/tmp/my-project', name: 'my-project', mergeMode: 'manual' as const }]
+    const persistence = createFakePersistenceAdapter({ projects: seeded })
+    const git = createFakeGitAdapter()
+    const processAdapter = createFakeProcessAdapter()
+    const notification = createFakeNotificationAdapter()
+    const github = createFakeGitHubAdapter()
+    const discovery = createFakeDiscoveryAdapter()
+    const engine = createEngine({ persistence, git, process: processAdapter, notification, github, discovery })
+    return { engine, git, processAdapter }
+  }
+
+  it("discards a terminal session's worktree and drops it from every list", async () => {
+    const { engine, git } = makeEngine()
+    const spawned = await engine.spawnSession('project-1')
+    await engine.stopSession(spawned.id)
+
+    await engine.removeSession(spawned.id)
+
+    expect(git.discardWorktreeCalls).toEqual([
+      { projectPath: '/tmp/my-project', worktreePath: spawned.worktreePath }
+    ])
+    await expect(engine.listSessions()).resolves.toEqual([])
+  })
+
+  it('stops a live process before discarding its worktree, then drops the session', async () => {
+    const { engine, git, processAdapter } = makeEngine()
+    const spawned = await engine.spawnSession('project-1')
+
+    await engine.removeSession(spawned.id)
+
+    expect(processAdapter.stoppedPids).toEqual([spawned.pid])
+    expect(git.discardWorktreeCalls).toEqual([
+      { projectPath: '/tmp/my-project', worktreePath: spawned.worktreePath }
+    ])
+    await expect(engine.listSessions()).resolves.toEqual([])
+  })
+
+  it('drops a session whose worktree is already gone without discarding again', async () => {
+    const { engine, git } = makeEngine()
+    const spawned = await engine.spawnSession('project-1')
+    await engine.stopSession(spawned.id)
+    await engine.discardWorktree(spawned.id)
+    git.discardWorktreeCalls.length = 0
+
+    await engine.removeSession(spawned.id)
+
+    expect(git.discardWorktreeCalls).toEqual([])
+    await expect(engine.listSessions()).resolves.toEqual([])
+  })
+
+  it('rejects when the session id is unknown', async () => {
+    const { engine } = makeEngine()
+    await expect(engine.removeSession('missing')).rejects.toThrow('Unknown session: missing')
+  })
+
+  it('rejects a concurrent second removeSession for the same session while the first is still in flight', async () => {
+    const { engine, git } = makeEngine()
+    const spawned = await engine.spawnSession('project-1')
+    await engine.stopSession(spawned.id)
+
+    let releaseDiscard!: () => void
+    const discardStarted = new Promise<void>((resolveStarted) => {
+      const original = git.discardWorktree.bind(git)
+      git.discardWorktree = async (projectPath, worktreePath) => {
+        resolveStarted()
+        await new Promise<void>((resolveRelease) => {
+          releaseDiscard = resolveRelease
+        })
+        return original(projectPath, worktreePath)
+      }
+    })
+
+    const first = engine.removeSession(spawned.id)
+    await discardStarted
+
+    await expect(engine.removeSession(spawned.id)).rejects.toThrow(
+      `A worktree operation is already in progress for session: ${spawned.id}`
+    )
+
+    releaseDiscard()
+    await first
+    await expect(engine.listSessions()).resolves.toEqual([])
+  })
+})
+
 describe('Engine.discoverSessions', () => {
   it('returns an empty list when nothing is discovered and nothing is tracked', async () => {
     const persistence = createFakePersistenceAdapter()

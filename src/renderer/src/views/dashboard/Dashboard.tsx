@@ -14,7 +14,8 @@ export function Dashboard({
   onStopSession,
   onNewSession,
   onRespondToPrompt,
-  onOpenAdopt
+  onOpenAdopt,
+  onRequestRemove
 }: {
   projects: Project[]
   sessions: Session[]
@@ -26,6 +27,7 @@ export function Dashboard({
   onNewSession: (projectId: string) => void
   onRespondToPrompt: (sessionId: string, response: string) => void
   onOpenAdopt: () => void
+  onRequestRemove: (sessionId: string) => void
 }): React.JSX.Element {
   const groups = groupSessionsByProject(projects, sessions)
   const attention = needsAttentionSessions(sessions)
@@ -56,6 +58,7 @@ export function Dashboard({
           onNewSession={onNewSession}
           onRespondToPrompt={onRespondToPrompt}
           onOpenAdopt={onOpenAdopt}
+          onRequestRemove={onRequestRemove}
         />
       )}
     </div>

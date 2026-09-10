@@ -5,12 +5,14 @@ export function ProjectGroup({
   group,
   onOpenSession,
   onOpenDiff,
-  onStopSession
+  onStopSession,
+  onRequestRemove
 }: {
   group: ProjectSessionGroup
   onOpenSession: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
   onStopSession: (sessionId: string) => void
+  onRequestRemove: (sessionId: string) => void
 }): React.JSX.Element {
   return (
     <>
@@ -33,6 +35,7 @@ export function ProjectGroup({
               onOpen={onOpenSession}
               onOpenDiff={onOpenDiff}
               onStop={onStopSession}
+              onRequestRemove={onRequestRemove}
             />
           ))
         )}

@@ -13,7 +13,8 @@ export function MainPane({
   onStopSession,
   onNewSession,
   onRespondToPrompt,
-  onOpenAdopt
+  onOpenAdopt,
+  onRequestRemove
 }: {
   sessions: Session[]
   groups: ProjectSessionGroup[]
@@ -25,6 +26,7 @@ export function MainPane({
   onNewSession: (projectId: string) => void
   onRespondToPrompt: (sessionId: string, response: string) => void
   onOpenAdopt: () => void
+  onRequestRemove: (sessionId: string) => void
 }): React.JSX.Element {
   const stats = summarizeStatuses(sessions)
   // The global "New session" spawns into the first project - MainPane only
@@ -73,6 +75,7 @@ export function MainPane({
             onOpenSession={onOpenSession}
             onOpenDiff={onOpenDiff}
             onStopSession={onStopSession}
+            onRequestRemove={onRequestRemove}
           />
         ))}
       </div>

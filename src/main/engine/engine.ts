@@ -29,6 +29,7 @@ export interface Engine {
   requestMerge(sessionId: string): Promise<MergeResult>
   discoverSessions(): Promise<Session[]>
   discardWorktree(sessionId: string): Promise<Session>
+  removeSession(sessionId: string): Promise<void>
   adoptSession(pid: number, directory: string): Promise<Session>
 }
 
@@ -284,6 +285,72 @@ export function createEngine(adapters: EngineAdapters): Engine {
       await adapters.git.discardWorktree(project.path, session.worktreePath)
 
       return await markWorktreeRemoved(sessionId)
+    } finally {
+      worktreeOpInFlight.delete(sessionId)
+    }
+  }
+
+  // Tears a Session down completely and drops it from every list - the
+  // Dashboard / session-screen "Remove" action. Unlike discardWorktree (which
+  // only reclaims disk for an already-terminal Session and refuses a live
+  // one), removeSession handles a live Session end to end:
+  //
+  //   - Live (ACTIVE_STATUSES): stop the process first, so the worktree isn't
+  //     pulled out from under a still-running CLI, then discard the worktree.
+  //   - Terminal with a worktree still on disk: discard the worktree.
+  //   - Worktree already gone (merge-mode cleanup or a previous discard):
+  //     nothing on disk to remove - just forget the Session.
+  //
+  // The discard is the force variant (adapters.git.discardWorktree, same as an
+  // explicit discard) since the user is deliberately throwing the Session
+  // away; the renderer confirms first whenever a worktree will actually be
+  // discarded. Afterwards the Session record, its CLI-session-id mapping and
+  // any buffered local messages are all dropped, so it vanishes from
+  // listSessions. Resolves with nothing - there's no Session left to hand back.
+  async function removeSession(sessionId: string): Promise<void> {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (!session) {
+      throw new Error(`Unknown session: ${sessionId}`)
+    }
+    // Claimed synchronously before the first await, like requestMerge /
+    // discardWorktree, so a double-clicked Remove - or a Remove racing a
+    // discard/merge - can't both act on the same worktree.
+    if (worktreeOpInFlight.has(sessionId)) {
+      throw new Error(`A worktree operation is already in progress for session: ${sessionId}`)
+    }
+    worktreeOpInFlight.add(sessionId)
+
+    try {
+      // Stop a still-live process before touching its worktree. stop is a
+      // no-op for an already-dead pid, but only an active Session is worth
+      // asking to stop at all.
+      if (ACTIVE_STATUSES.has(session.status)) {
+        await adapters.process.stop(session.pid)
+      }
+
+      // Discard the worktree if one is still on disk. A Session whose Project
+      // has somehow gone missing (its directory moved) still gets dropped from
+      // the list rather than stranded forever - the orphaned worktree is
+      // logged instead.
+      if (!session.worktreeRemoved) {
+        const existing = await loadProjects()
+        const project = existing.find((candidate) => candidate.id === session.projectId)
+        if (project) {
+          await adapters.git.discardWorktree(project.path, session.worktreePath)
+        } else {
+          console.error(
+            `Removing session ${sessionId} whose project ${session.projectId} is unknown; worktree left in place`
+          )
+        }
+      }
+
+      // The near-instant array update is the only part that needs the write
+      // queue (the slow subprocess I/O above ran outside it, like discard).
+      await serializeSessionWrite(async () => {
+        sessions = sessions.filter((candidate) => candidate.id !== sessionId)
+      })
+      cliSessionIds.delete(sessionId)
+      localMessages.delete(sessionId)
     } finally {
       worktreeOpInFlight.delete(sessionId)
     }
@@ -671,6 +738,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     requestMerge,
     discoverSessions,
     discardWorktree,
+    removeSession,
     adoptSession
   }
 }

@@ -274,6 +274,27 @@ export function upsertSession(sessions: Session[], session: Session): Session[] 
   return next
 }
 
+/**
+ * Drops a removed Session from a list, in place of waiting for the poll's next
+ * refresh to notice it's gone. Returns a new array and never mutates the input;
+ * a no-op (returns the same reference) when the id isn't present.
+ */
+export function removeSessionFromState(sessions: Session[], sessionId: string): Session[] {
+  if (!sessions.some((candidate) => candidate.id === sessionId)) return sessions
+  return sessions.filter((candidate) => candidate.id !== sessionId)
+}
+
+/**
+ * Whether removing this Session will discard a worktree from disk - true
+ * whenever one is still there. Drives the Remove confirmation: a worktree
+ * discard is destructive (it can throw away unreviewed/unmerged work) and must
+ * be confirmed, whereas removing a Session whose worktree is already gone only
+ * forgets a record.
+ */
+export function removalDiscardsWorktree(session: Session): boolean {
+  return !session.worktreeRemoved
+}
+
 // --- Session screen (05b) helpers ------------------------------------------
 
 export interface NavBuckets {

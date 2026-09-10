@@ -85,6 +85,7 @@ export const IPC_CHANNELS = {
   setProjectMergeMode: 'project:set-merge-mode',
   requestMerge: 'session:request-merge',
   discardWorktree: 'session:discard-worktree',
+  removeSession: 'session:remove',
   adoptSession: 'session:adopt'
 } as const
 
@@ -102,5 +103,9 @@ export interface OrcaApi {
   setProjectMergeMode(projectId: string, mergeMode: MergeMode): Promise<Project>
   requestMerge(sessionId: string): Promise<MergeResult>
   discardWorktree(sessionId: string): Promise<Session>
+  // Tears a Session down completely - stops a live process, discards any
+  // worktree still on disk, and drops the Session from every list. Resolves
+  // with nothing: there's no Session left to return.
+  removeSession(sessionId: string): Promise<void>
   adoptSession(pid: number, directory: string): Promise<Session>
 }

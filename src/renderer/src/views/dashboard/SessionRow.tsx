@@ -13,13 +13,15 @@ export function SessionRow({
   projectName,
   onOpen,
   onOpenDiff,
-  onStop
+  onStop,
+  onRequestRemove
 }: {
   session: HomeSession
   projectName: string
   onOpen: (sessionId: string) => void
   onOpenDiff: (sessionId: string) => void
   onStop: (sessionId: string) => void
+  onRequestRemove: (sessionId: string) => void
 }): React.JSX.Element {
   const branchClass = isTerminalStatus(session.status) ? 'text-secondary' : 'text-primary'
   const diffStat = formatDiffStat(session)
@@ -33,6 +35,13 @@ export function SessionRow({
     if (action.kind === 'review') onOpenDiff(session.id)
     else if (action.kind === 'log') onOpen(session.id)
     else onStop(session.id)
+  }
+
+  // Remove tears the session down (confirmed in a modal, App-level); like the
+  // contextual action it must not also trigger the row's own navigation.
+  function runRemove(event: React.MouseEvent): void {
+    event.stopPropagation()
+    onRequestRemove(session.id)
   }
 
   return (
@@ -61,6 +70,14 @@ export function SessionRow({
         onClick={runAction}
       >
         {action.label}
+      </button>
+      <button
+        type="button"
+        className="w-[52px] flex-none text-right text-[11px] text-faint hover:text-danger"
+        onClick={runRemove}
+        aria-label={`Remove ${projectName}/${session.branch}`}
+      >
+        Remove
       </button>
     </div>
   )

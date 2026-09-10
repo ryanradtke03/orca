@@ -10,15 +10,18 @@ import { isMockMode } from './mock'
 import { MockDevToolbar } from './mock/MockDevToolbar'
 import { ModeBadge } from './components/ModeBadge'
 import { AdoptSessionModal } from './components/AdoptSessionModal'
+import { RemoveSessionModal } from './components/RemoveSessionModal'
+import type { Session } from '../../shared/ipc-contract'
 
 type View = { type: 'dashboard' } | { type: 'diff'; sessionId: string } | { type: 'session'; sessionId: string }
 
 export function App(): React.JSX.Element {
-  const { projects, sessions, refreshAll, applySession, loadError } = useSessionPoll()
+  const { projects, sessions, refreshAll, applySession, dropSession, loadError } = useSessionPoll()
   const review = useReviewState()
   const [view, setView] = useState<View>({ type: 'dashboard' })
   const [statusMessage, setStatusMessage] = useState('')
   const [adoptOpen, setAdoptOpen] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState<Session | null>(null)
 
   const openSession = (sessionId: string): void => setView({ type: 'session', sessionId })
   const openDiff = (sessionId: string): void => setView({ type: 'diff', sessionId })
@@ -84,6 +87,24 @@ export function App(): React.JSX.Element {
     }
   }
 
+  // Opens the confirm modal for a row's / the header's Remove action. The
+  // actual removal only runs once RemoveSessionModal confirms (handleRemoveSession).
+  function requestRemoveSession(sessionId: string): void {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    if (session) setRemoveTarget(session)
+  }
+
+  // The confirmed removal: drop the session everywhere, and if it was the one
+  // open on the session/diff screen there's nothing left to show, so fall back
+  // to the dashboard. Rejections propagate to RemoveSessionModal, which keeps
+  // the dialog open and surfaces the error inline (it never crashes the app).
+  async function handleRemoveSession(sessionId: string): Promise<void> {
+    await orca.removeSession(sessionId)
+    dropSession(sessionId)
+    setStatusMessage('')
+    if (view.type !== 'dashboard' && view.sessionId === sessionId) backToDashboard()
+  }
+
   // The happy path only: adopt the session and reflect it optimistically. The
   // AdoptSessionModal owns validation and inline error display, so failures
   // reject back to it (staying open) rather than being swallowed here.
@@ -117,6 +138,7 @@ export function App(): React.JSX.Element {
         onStopSession={handleStopSession}
         onNewSession={handleNewSession}
         onRespondToPrompt={respondToPrompt}
+        onRequestRemove={requestRemoveSession}
       />
     )
   } else {
@@ -132,6 +154,7 @@ export function App(): React.JSX.Element {
         onNewSession={handleNewSession}
         onRespondToPrompt={handleRespondFromDashboard}
         onOpenAdopt={() => setAdoptOpen(true)}
+        onRequestRemove={requestRemoveSession}
       />
     )
   }
@@ -140,6 +163,14 @@ export function App(): React.JSX.Element {
     <>
       {content}
       {adoptOpen && <AdoptSessionModal onAdopt={handleAdoptSession} onClose={() => setAdoptOpen(false)} />}
+      {removeTarget && (
+        <RemoveSessionModal
+          session={removeTarget}
+          projectName={projects.find((project) => project.id === removeTarget.projectId)?.name ?? removeTarget.projectId}
+          onConfirm={handleRemoveSession}
+          onClose={() => setRemoveTarget(null)}
+        />
+      )}
       <ModeBadge />
       {/* Dev-only Home populated/empty toggle - mock mode only (ticket #49). */}
       {isMockMode() && <MockDevToolbar onToggle={() => void refreshAll()} />}

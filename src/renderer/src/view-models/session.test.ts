@@ -23,6 +23,8 @@ import {
   isTerminalStatus,
   MERGE_MODES,
   needsAttentionSessions,
+  removalDiscardsWorktree,
+  removeSessionFromState,
   shortMergeMode,
   summarizeFilesTouched,
   summarizeStatuses,
@@ -542,5 +544,35 @@ describe('upsertSession', () => {
     expect(result).not.toBe(sessions)
     expect(sessions[0]).toBe(original)
     expect(original.status).toBe('running')
+  })
+})
+
+describe('removeSessionFromState', () => {
+  it('drops the matching session by id, preserving the others in order', () => {
+    const sessions = [makeSession({ id: 'a' }), makeSession({ id: 'b' }), makeSession({ id: 'c' })]
+    const result = removeSessionFromState(sessions, 'b')
+    expect(result.map((s) => s.id)).toEqual(['a', 'c'])
+  })
+
+  it('returns the same array reference when the id is not present', () => {
+    const sessions = [makeSession({ id: 'a' })]
+    expect(removeSessionFromState(sessions, 'missing')).toBe(sessions)
+  })
+
+  it('never mutates the input array', () => {
+    const sessions = [makeSession({ id: 'a' }), makeSession({ id: 'b' })]
+    const result = removeSessionFromState(sessions, 'a')
+    expect(result).not.toBe(sessions)
+    expect(sessions.map((s) => s.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('removalDiscardsWorktree', () => {
+  it('is true while the worktree is still on disk', () => {
+    expect(removalDiscardsWorktree(makeSession({ status: 'stopped' }))).toBe(true)
+  })
+
+  it('is false once the worktree has already been removed', () => {
+    expect(removalDiscardsWorktree(makeSession({ status: 'done', worktreeRemoved: true }))).toBe(false)
   })
 })
