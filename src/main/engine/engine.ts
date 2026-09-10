@@ -295,8 +295,10 @@ export function createEngine(adapters: EngineAdapters): Engine {
   // only reclaims disk for an already-terminal Session and refuses a live
   // one), removeSession handles a live Session end to end:
   //
-  //   - Live (ACTIVE_STATUSES): stop the process first, so the worktree isn't
-  //     pulled out from under a still-running CLI, then discard the worktree.
+  //   - Live (ACTIVE_STATUSES): request a stop first so the CLI gets a chance
+  //     to exit cleanly, then force-discard the worktree. The stop is best-
+  //     effort - it returns once the CLI acknowledges it, not necessarily once
+  //     the process has fully exited - so the discard is forced regardless.
   //   - Terminal with a worktree still on disk: discard the worktree.
   //   - Worktree already gone (merge-mode cleanup or a previous discard):
   //     nothing on disk to remove - just forget the Session.
@@ -321,9 +323,11 @@ export function createEngine(adapters: EngineAdapters): Engine {
     worktreeOpInFlight.add(sessionId)
 
     try {
-      // Stop a still-live process before touching its worktree. stop is a
-      // no-op for an already-dead pid, but only an active Session is worth
-      // asking to stop at all.
+      // Ask a still-live process to stop before touching its worktree, so the
+      // CLI gets a chance to exit cleanly first. Best-effort: stop returns on
+      // acknowledgement, not on guaranteed full exit, and the discard below is
+      // forced regardless. stop is a no-op for an already-dead pid, but only an
+      // active Session is worth asking at all.
       if (ACTIVE_STATUSES.has(session.status)) {
         await adapters.process.stop(session.pid)
       }

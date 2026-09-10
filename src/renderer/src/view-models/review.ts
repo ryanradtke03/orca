@@ -10,9 +10,15 @@ import type { ReviewFileDiff } from './diff'
  */
 export type ReviewState = Record<string, readonly string[]>
 
+// A single shared empty list for the "nothing marked yet" case, so
+// reviewedPathsFor returns a stable reference across calls rather than a fresh
+// [] each time - letting callers (e.g. the diff screen's useMemo over these
+// paths) skip needless recomputation when review progress hasn't changed.
+const EMPTY_PATHS: readonly string[] = []
+
 /** The reviewed paths for one session, or an empty list if none marked yet. */
 export function reviewedPathsFor(state: ReviewState, sessionId: string): readonly string[] {
-  return state[sessionId] ?? []
+  return state[sessionId] ?? EMPTY_PATHS
 }
 
 export function isReviewed(state: ReviewState, sessionId: string, path: string): boolean {

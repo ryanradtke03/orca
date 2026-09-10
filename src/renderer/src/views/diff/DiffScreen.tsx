@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MergeMode, Project, Session } from '../../../../shared/ipc-contract'
 import { useDiff } from '../../hooks/useDiff'
 import {
@@ -316,7 +316,11 @@ export function DiffScreen({
   // diff payload - applyReviewed stamps it onto the loaded files so the tree,
   // counter and Mark-reviewed button all reflect the same source of truth.
   const { files: rawFiles, loadError } = useDiff(sessionId)
-  const files = rawFiles ? applyReviewed(rawFiles, reviewedPaths) : null
+  // Memoized so a poll-driven App re-render doesn't re-clone every file object
+  // (applyReviewed) and hand the keydown effect below a fresh `files` reference
+  // that would tear its listener down and re-add it each render. rawFiles and
+  // reviewedPaths are both reference-stable until they actually change.
+  const files = useMemo(() => (rawFiles ? applyReviewed(rawFiles, reviewedPaths) : null), [rawFiles, reviewedPaths])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   // Which hunk j/k has scrolled to within the selected file; reset per file below.
   const [activeHunk, setActiveHunk] = useState(0)
@@ -337,6 +341,16 @@ export function DiffScreen({
   // Reset the hunk cursor whenever the shown file changes (tree click, `a`, Next file).
   const selectedFilePath = selected?.path ?? null
   useEffect(() => setActiveHunk(0), [selectedFilePath])
+
+  // The scroll viewport persists across file changes (same DOM node). A file
+  // with hunks gets scrolled back to the top by HunkView (scrollIntoView on
+  // hunk 0), but a binary / pure-rename file has no hunk ref to scroll to and
+  // would otherwise keep the previous file's scroll, hiding its placeholder
+  // below the fold - so reset the container here for that case.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (hunkCount === 0 && scrollRef.current) scrollRef.current.scrollTop = 0
+  }, [selectedFilePath, hunkCount])
 
   // j/k move between hunks; a marks the current file reviewed and advances to
   // the next (wrapping, like the Next file button). Guarded so the shortcuts
@@ -393,7 +407,7 @@ export function DiffScreen({
           onBack={onBack}
         />
         <FileBar file={selected} />
-        <div className="flex-1 overflow-y-auto">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto">
           <HunkView file={selected} hunks={hunks} activeHunk={activeHunk} />
         </div>
         <DiffFooter
