@@ -1,11 +1,13 @@
 import { useCallback, useState } from 'react'
-import { reviewedPathsFor, toggleReviewed, type ReviewState } from '../view-models/review'
+import { markReviewed, reviewedPathsFor, toggleReviewed, type ReviewState } from '../view-models/review'
 
 export interface ReviewProgress {
   /** The reviewed file paths for one session (empty until the user marks any). */
   reviewedPathsFor: (sessionId: string) => readonly string[]
-  /** Marks/unmarks one file reviewed in the given session. */
+  /** Marks/unmarks one file reviewed in the given session (the footer toggle). */
   toggleReviewed: (sessionId: string, path: string) => void
+  /** Marks one file reviewed idempotently (the `a` mark-and-advance keybind). */
+  markReviewed: (sessionId: string, path: string) => void
 }
 
 /**
@@ -20,6 +22,10 @@ export function useReviewState(): ReviewProgress {
     reviewedPathsFor: useCallback((sessionId: string) => reviewedPathsFor(state, sessionId), [state]),
     toggleReviewed: useCallback(
       (sessionId: string, path: string) => setState((prev) => toggleReviewed(prev, sessionId, path)),
+      []
+    ),
+    markReviewed: useCallback(
+      (sessionId: string, path: string) => setState((prev) => markReviewed(prev, sessionId, path)),
       []
     )
   }

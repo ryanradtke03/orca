@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FileDiff } from '../../../shared/ipc-contract'
-import { applyReviewed, isReviewed, reviewedPathsFor, toggleReviewed, type ReviewState } from './review'
+import { applyReviewed, isReviewed, markReviewed, reviewedPathsFor, toggleReviewed, type ReviewState } from './review'
 
 function makeFile(path: string): FileDiff {
   return { path, status: 'modified', additions: 1, deletions: 0, diffText: '' }
@@ -42,6 +42,32 @@ describe('toggleReviewed', () => {
   it('never mutates the input state', () => {
     const state: ReviewState = { s1: ['a.ts'] }
     const next = toggleReviewed(state, 's1', 'b.ts')
+    expect(state).toEqual({ s1: ['a.ts'] })
+    expect(next).not.toBe(state)
+  })
+})
+
+describe('markReviewed', () => {
+  it('marks a not-yet-reviewed file', () => {
+    expect(markReviewed({}, 's1', 'a.ts')).toEqual({ s1: ['a.ts'] })
+  })
+
+  it('leaves an already-reviewed file reviewed (never unmarks)', () => {
+    expect(markReviewed({ s1: ['a.ts'] }, 's1', 'a.ts')).toEqual({ s1: ['a.ts'] })
+  })
+
+  it('returns the same state reference when nothing changes', () => {
+    const state: ReviewState = { s1: ['a.ts'] }
+    expect(markReviewed(state, 's1', 'a.ts')).toBe(state)
+  })
+
+  it('keeps other sessions untouched', () => {
+    expect(markReviewed({ s1: ['a.ts'] }, 's2', 'x.ts')).toEqual({ s1: ['a.ts'], s2: ['x.ts'] })
+  })
+
+  it('never mutates the input state', () => {
+    const state: ReviewState = { s1: ['a.ts'] }
+    const next = markReviewed(state, 's1', 'b.ts')
     expect(state).toEqual({ s1: ['a.ts'] })
     expect(next).not.toBe(state)
   })

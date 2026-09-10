@@ -102,6 +102,7 @@ export function App(): React.JSX.Element {
         reviewedPaths={review.reviewedPathsFor(view.sessionId)}
         onBack={backToDashboard}
         onToggleReviewed={review.toggleReviewed}
+        onMarkReviewed={review.markReviewed}
       />
     )
   } else if (view.type === 'session') {

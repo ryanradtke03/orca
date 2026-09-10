@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MergeMode, Project, Session } from '../../../../shared/ipc-contract'
 import { useDiff } from '../../hooks/useDiff'
 import {
@@ -7,9 +7,11 @@ import {
   groupFilesByFolder,
   parseHunks,
   summarizeReview,
+  type DiffHunk,
   type DiffRow,
   type ReviewFileDiff
 } from '../../view-models/diff'
+import { isEditableTarget, stepHunk } from '../../view-models/diff-keys'
 import { applyReviewed } from '../../view-models/review'
 import { describeMergeMode, describeStatus } from '../../view-models/session'
 import { StatusMarker } from '../../components/StatusMarker'
@@ -193,8 +195,22 @@ function DiffLineRow({ row }: { row: DiffRow }): React.JSX.Element {
   )
 }
 
-function HunkView({ file }: { file: ReviewFileDiff }): React.JSX.Element {
-  const hunks = parseHunks(file.diffText)
+function HunkView({
+  file,
+  hunks,
+  activeHunk
+}: {
+  file: ReviewFileDiff
+  hunks: DiffHunk[]
+  activeHunk: number
+}): React.JSX.Element {
+  const hunkRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  // j/k scroll the active hunk to the top of the viewport. Keyed on file.path
+  // too so re-selecting a file (which resets activeHunk to 0) scrolls to its top.
+  useEffect(() => {
+    hunkRefs.current[activeHunk]?.scrollIntoView({ block: 'start' })
+  }, [activeHunk, file.path])
 
   if (hunks.length === 0) {
     // Binary file / pure rename - no line-numbered hunks to render.
@@ -208,7 +224,12 @@ function HunkView({ file }: { file: ReviewFileDiff }): React.JSX.Element {
   return (
     <div className="overflow-x-auto font-mono text-[11.5px] leading-relaxed">
       {hunks.map((hunk, index) => (
-        <div key={index}>
+        <div
+          key={index}
+          ref={(el) => {
+            hunkRefs.current[index] = el
+          }}
+        >
           <div className="flex items-center justify-between bg-[#151514] px-6 py-1">
             <span className="text-tertiary">{hunk.header}</span>
             <span className="pr-2 text-[10px] text-faint">
@@ -279,7 +300,8 @@ export function DiffScreen({
   projects,
   reviewedPaths,
   onBack,
-  onToggleReviewed
+  onToggleReviewed,
+  onMarkReviewed
 }: {
   sessionId: string
   sessions: Session[]
@@ -287,6 +309,7 @@ export function DiffScreen({
   reviewedPaths: readonly string[]
   onBack: () => void
   onToggleReviewed: (sessionId: string, path: string) => void
+  onMarkReviewed: (sessionId: string, path: string) => void
 }): React.JSX.Element {
   const session = sessions.find((candidate) => candidate.id === sessionId)
   // The `reviewed` flag is app-tracked (per session, in App), not part of the
@@ -295,20 +318,58 @@ export function DiffScreen({
   const { files: rawFiles, loadError } = useDiff(sessionId)
   const files = rawFiles ? applyReviewed(rawFiles, reviewedPaths) : null
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  // Which hunk j/k has scrolled to within the selected file; reset per file below.
+  const [activeHunk, setActiveHunk] = useState(0)
 
   // Reset the selection when navigating to a different session's diff.
   useEffect(() => setSelectedPath(null), [sessionId])
+
+  const selectedIndex = files
+    ? Math.max(
+        0,
+        files.findIndex((file) => file.path === selectedPath)
+      )
+    : 0
+  const selected = files?.[selectedIndex] ?? null
+  const hunks = selected ? parseHunks(selected.diffText) : []
+  const hunkCount = hunks.length
+
+  // Reset the hunk cursor whenever the shown file changes (tree click, `a`, Next file).
+  const selectedFilePath = selected?.path ?? null
+  useEffect(() => setActiveHunk(0), [selectedFilePath])
+
+  // j/k move between hunks; a marks the current file reviewed and advances to
+  // the next (wrapping, like the Next file button). Guarded so the shortcuts
+  // stay dormant while typing in the composer or any other input.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (isEditableTarget(event.target)) return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.key === 'j') {
+        event.preventDefault()
+        setActiveHunk((current) => stepHunk(current, hunkCount, 1))
+      } else if (event.key === 'k') {
+        event.preventDefault()
+        setActiveHunk((current) => stepHunk(current, hunkCount, -1))
+      } else if (event.key === 'a') {
+        event.preventDefault()
+        if (!files || files.length === 0 || !selected) return
+        onMarkReviewed(sessionId, selected.path)
+        setSelectedPath(files[(selectedIndex + 1) % files.length].path)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [hunkCount, selected, files, selectedIndex, sessionId, onMarkReviewed])
 
   if (!session) return <DiffShell onBack={onBack}>Failed to load diff: Unknown session: {sessionId}</DiffShell>
   if (loadError) return <DiffShell onBack={onBack}>Failed to load diff: {loadError}</DiffShell>
   if (files === null) return <DiffShell onBack={onBack}>Loading diff…</DiffShell>
   if (files.length === 0) return <DiffShell onBack={onBack}>This session hasn&apos;t changed anything yet.</DiffShell>
+  // Unreachable given files.length > 0 - narrows `selected` from the nullable
+  // form computed above (before the guards) for the render below.
+  if (!selected) return <DiffShell onBack={onBack}>Loading diff…</DiffShell>
 
-  const selectedIndex = Math.max(
-    0,
-    files.findIndex((file) => file.path === selectedPath)
-  )
-  const selected = files[selectedIndex]
   const project = projects.find((candidate) => candidate.id === session.projectId)
   const additions = files.reduce((sum, file) => sum + file.additions, 0)
   const deletions = files.reduce((sum, file) => sum + file.deletions, 0)
@@ -333,7 +394,7 @@ export function DiffScreen({
         />
         <FileBar file={selected} />
         <div className="flex-1 overflow-y-auto">
-          <HunkView file={selected} />
+          <HunkView file={selected} hunks={hunks} activeHunk={activeHunk} />
         </div>
         <DiffFooter
           fileIndex={selectedIndex}

@@ -27,6 +27,18 @@ export function toggleReviewed(state: ReviewState, sessionId: string, path: stri
 }
 
 /**
+ * Marks one file reviewed, returning a new state (never mutates the input).
+ * Idempotent - unlike toggleReviewed it never unmarks, so the `a` keybind can
+ * mark-and-advance without un-reviewing a file the user revisits. Returns the
+ * same state reference when the file is already reviewed, so React can bail.
+ */
+export function markReviewed(state: ReviewState, sessionId: string, path: string): ReviewState {
+  const current = reviewedPathsFor(state, sessionId)
+  if (current.includes(path)) return state
+  return { ...state, [sessionId]: [...current, path] }
+}
+
+/**
  * Stamps each file's `reviewed` flag from the app-tracked reviewed-path list,
  * so the file tree and "N / M reviewed" counter reflect the app's own review
  * state rather than whatever the diff payload happened to carry (live mode
