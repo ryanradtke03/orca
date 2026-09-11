@@ -65,6 +65,10 @@ export function registerIpcHandlers(engine: Engine): void {
     engine.removeSession(sessionId)
   )
 
+  ipcMain.handle(IPC_CHANNELS.removeProject, (_event, projectId: string) =>
+    engine.removeProject(projectId)
+  )
+
   ipcMain.handle(IPC_CHANNELS.adoptSession, (_event, pid: number, directory: string) =>
     engine.adoptSession(pid, directory)
   )

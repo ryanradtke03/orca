@@ -86,6 +86,7 @@ export const IPC_CHANNELS = {
   requestMerge: 'session:request-merge',
   discardWorktree: 'session:discard-worktree',
   removeSession: 'session:remove',
+  removeProject: 'project:remove',
   adoptSession: 'session:adopt'
 } as const
 
@@ -107,5 +108,10 @@ export interface OrcaApi {
   // worktree still on disk, and drops the Session from every list. Resolves
   // with nothing: there's no Session left to return.
   removeSession(sessionId: string): Promise<void>
+  // Removes a Project and cascade-removes every Session under it - each torn
+  // down exactly as removeSession would (stop a live process, discard any
+  // worktree still on disk), then the Project itself is dropped from every
+  // list. Resolves with nothing: there's no Project left to return.
+  removeProject(projectId: string): Promise<void>
   adoptSession(pid: number, directory: string): Promise<Session>
 }

@@ -30,6 +30,7 @@ export interface Engine {
   discoverSessions(): Promise<Session[]>
   discardWorktree(sessionId: string): Promise<Session>
   removeSession(sessionId: string): Promise<void>
+  removeProject(projectId: string): Promise<void>
   adoptSession(pid: number, directory: string): Promise<Session>
 }
 
@@ -358,6 +359,44 @@ export function createEngine(adapters: EngineAdapters): Engine {
     } finally {
       worktreeOpInFlight.delete(sessionId)
     }
+  }
+
+  // Removes a Project and everything under it - the "Remove project" action.
+  // Policy is cascade (#73): every Session belonging to the Project is torn
+  // down first through removeSession - the exact same path as the per-session
+  // Remove, so a live process is stopped and any worktree still on disk is
+  // force-discarded - and only then is the Project itself dropped from the
+  // persisted list. Afterwards the Project and all its Sessions are gone from
+  // listProjects / listSessions. The renderer confirms first whenever any
+  // worktree will actually be discarded.
+  //
+  // Sessions are removed sequentially (not in parallel) so their worktree I/O
+  // doesn't fan out, matching how removeSession runs its own subprocess work
+  // outside the write queue; a teardown that throws aborts the whole removal
+  // (the Project and any not-yet-removed Sessions stay) rather than leaving it
+  // half-done. The final Project-list write is queued behind writeQueue, like
+  // addProject / setProjectMergeMode, so a concurrent project write can't
+  // clobber it.
+  async function removeProject(projectId: string): Promise<void> {
+    const existing = await loadProjects()
+    if (!existing.some((candidate) => candidate.id === projectId)) {
+      throw new Error(`Unknown project: ${projectId}`)
+    }
+
+    // Snapshot the owned Sessions up front, then tear each down via the same
+    // path as a per-session Remove (removeSession splices `sessions` itself).
+    const owned = sessions.filter((candidate) => candidate.projectId === projectId)
+    for (const session of owned) {
+      await removeSession(session.id)
+    }
+
+    const write = writeQueue.then(async () => {
+      const current = await loadProjects()
+      projects = current.filter((candidate) => candidate.id !== projectId)
+      await adapters.persistence.saveProjects(projects)
+    })
+    writeQueue = write.catch(() => {})
+    await write
   }
 
   async function spawnSession(projectId: string): Promise<Session> {
@@ -743,6 +782,7 @@ export function createEngine(adapters: EngineAdapters): Engine {
     discoverSessions,
     discardWorktree,
     removeSession,
+    removeProject,
     adoptSession
   }
 }

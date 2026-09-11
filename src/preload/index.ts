@@ -18,6 +18,7 @@ const orca: OrcaApi = {
   requestMerge: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.requestMerge, sessionId),
   discardWorktree: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.discardWorktree, sessionId),
   removeSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.removeSession, sessionId),
+  removeProject: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.removeProject, projectId),
   adoptSession: (pid, directory) => ipcRenderer.invoke(IPC_CHANNELS.adoptSession, pid, directory)
 }
 
