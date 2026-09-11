@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A terminal workspace app built with Electron, React, and TypeScript",
   "main": "./out/main/index.js",
-  "author": "rad43445@gmail.com",
+  "author": "ryancradtke3@gmail.com",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
