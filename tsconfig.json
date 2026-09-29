@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "references": [
+    // Add each package/app as it gets its own tsconfig.json, e.g.:
+    // { "path": "packages/messenger" },
+    // { "path": "packages/engine" },
+    // { "path": "apps/desktop" }
+  ]
+}
