@@ -126,9 +126,10 @@ const check = (label: string, ok: boolean) => {
     description: "",
     input: z.object({}),
     async plan() {
+      // b depends on a, so the cap is re-checked after a finishes and b never starts.
       return [
         { id: "a", goal: "a", dependsOn: [], context: {} },
-        { id: "b", goal: "b", dependsOn: [], context: {} },
+        { id: "b", goal: "b", dependsOn: ["a"], context: {} },
       ];
     },
     worker: () => ({ prompt: "p", tools: ["Edit"], maxTurns: 1 }),

@@ -128,9 +128,16 @@ export interface RunResult {
 }
 
 // ── Events ────────────────────────────────────────────────────
-// Later phases add plan.ready, approval.needed, budget.warning, etc.
+export interface PlanTask {
+  id: string;
+  goal: string;
+  dependsOn: string[];
+}
+
 export type EngineEvent =
   | { type: "run.started"; recipe: string; input: unknown }
+  | { type: "plan.ready"; tasks: PlanTask[] }
+  | { type: "approval.needed"; what: string }
   | { type: "task.started"; taskId: string; attempt: number; worktree: string }
   | { type: "worker.event"; taskId: string; event: MessengerEvent }
   | { type: "gate.passed"; taskId: string; gate: string }
@@ -138,6 +145,7 @@ export type EngineEvent =
   | { type: "task.retrying"; taskId: string; attempt: number; reasons: string[] }
   | { type: "task.done"; taskId: string; attempts: number; costUsd: number }
   | { type: "task.failed"; taskId: string; reasons: string[] }
+  | { type: "task.skipped"; taskId: string; reason: string }
   | { type: "budget.warning"; resource: "cost" | "duration"; used: number; limit: number }
   | { type: "run.done"; result: RunResult };
 
@@ -170,4 +178,6 @@ export interface RunCtx extends Ctx {
   budget: Budget;
   keepWorktrees: KeepWorktrees;
   worktreeDir?: string | undefined;
+  approvePlan: boolean;
+  waitApproval(): Promise<boolean>;
 }

@@ -34,7 +34,7 @@ export function createEngine(config: EngineConfig): Engine {
       const limits: EngineLimits = { ...baseLimits, ...opts?.limits };
       const recipe = config.recipes[name];
 
-      const run = createEngineRun(id, async (emit, signal): Promise<RunResult> => {
+      const run = createEngineRun(id, async (emit, signal, waitApproval): Promise<RunResult> => {
         const ctx: RunCtx = {
           repo: config.repo,
           messenger: config.messenger,
@@ -45,6 +45,8 @@ export function createEngine(config: EngineConfig): Engine {
           budget: createBudget(limits, emit),
           keepWorktrees,
           worktreeDir: config.worktreeDir,
+          approvePlan: opts?.approvePlan ?? false,
+          waitApproval,
         };
         return runRecipe(recipe, name, input, ctx);
       });

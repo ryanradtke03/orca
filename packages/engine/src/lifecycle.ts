@@ -1,6 +1,6 @@
-// The top-level flow (design §6): validate → plan → run tasks → finish, with
-// every exit producing a clean RunResult. Scheduling/parallelism is Phase 4;
-// tasks still run one after another here.
+// The top-level flow (design §6): validate → plan → approve → schedule → finish,
+// with every exit producing a clean RunResult.
+import { schedule, validateGraph } from "./scheduler.js";
 import { runTask } from "./task.js";
 import type {
   AnyRecipe,
@@ -8,6 +8,7 @@ import type {
   RunErrorKind,
   RunResult,
   RunResultTask,
+  Task,
   TaskResult,
 } from "./types.js";
 import { ensureExcluded, pruneWorktrees, removeRunWorktrees, removeWorktree } from "./workspace.js";
@@ -85,7 +86,7 @@ export async function runRecipe(
   await ensureExcluded(ctx.repo);
 
   // 3. plan
-  let tasks: TaskResult["task"][];
+  let tasks: Task[];
   try {
     tasks = await recipe.plan(parsed.data, ctx);
   } catch (err) {
@@ -93,25 +94,31 @@ export async function runRecipe(
   }
   if (!tasks || tasks.length === 0) return fail("plan_failed", "plan() returned no tasks");
 
-  // 4. run tasks (sequentially for now), stopping on cancel or budget
-  const results: TaskResult[] = [];
-  let stopped: "cancelled" | "budget" | "timeout" | null = null;
-  for (const task of tasks) {
-    if (ctx.signal.aborted) {
-      stopped = "cancelled";
-      break;
-    }
-    const capped = ctx.budget.exceeded();
-    if (capped) {
-      stopped = capped;
-      break;
-    }
-    results.push(await runTask(task, recipe, ctx));
-    if (ctx.signal.aborted) {
-      stopped = "cancelled";
-      break;
+  const graphError = validateGraph(tasks);
+  if (graphError) return fail("plan_failed", graphError);
+
+  ctx.emit({
+    type: "plan.ready",
+    tasks: tasks.map((t) => ({ id: t.id, goal: t.goal, dependsOn: t.dependsOn })),
+  });
+
+  // 4. optional plan approval — a rejected plan cancels before any worker runs
+  if (ctx.approvePlan) {
+    ctx.emit({ type: "approval.needed", what: "plan" });
+    const approved = await ctx.waitApproval();
+    if (!approved) {
+      return {
+        ...empty,
+        ok: false,
+        status: "cancelled",
+        durationMs: ctx.budget.elapsedMs(),
+        error: { kind: "cancelled", message: "plan rejected" },
+      };
     }
   }
+
+  // 5. schedule the tasks in dependency order, respecting maxWorkers
+  const { results, stopped } = await schedule(tasks, (task) => runTask(task, recipe, ctx), ctx);
 
   await cleanupWorktrees(ctx, results, stopped === "cancelled");
 
@@ -122,7 +129,7 @@ export async function runRecipe(
     tracePath: "",
   };
 
-  // 5. short-circuit exits — no finish() on cancel or budget stop
+  // 6. short-circuit exits — no finish() on cancel or budget stop
   if (stopped === "cancelled") {
     return {
       ...tally,
@@ -136,7 +143,7 @@ export async function runRecipe(
     return { ...tally, ok: false, status: "partial", error: { kind: stopped, message } };
   }
 
-  // 6. finish, then decide the final status from the task results
+  // 7. finish, then decide the final status from the task results
   let output: unknown;
   let finishFailed: string | null = null;
   try {

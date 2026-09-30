@@ -10,6 +10,8 @@ export {
   runGates,
 } from "./gates/index.js";
 export { defineRecipe } from "./recipe.js";
+export type { ScheduleCtx, ScheduleResult } from "./scheduler.js";
+export { schedule, validateGraph } from "./scheduler.js";
 export type {
   AnyRecipe,
   Budget,
@@ -23,6 +25,7 @@ export type {
   GateContext,
   GateResult,
   KeepWorktrees,
+  PlanTask,
   Recipe,
   RunCtx,
   RunErrorKind,
