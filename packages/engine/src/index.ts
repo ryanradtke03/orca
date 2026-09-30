@@ -12,6 +12,8 @@ export {
 export { defineRecipe } from "./recipe.js";
 export type { ScheduleCtx, ScheduleResult } from "./scheduler.js";
 export { schedule, validateGraph } from "./scheduler.js";
+export type { Tracer } from "./trace.js";
+export { createTracer, readRuns } from "./trace.js";
 export type {
   AnyRecipe,
   Budget,
@@ -27,10 +29,12 @@ export type {
   KeepWorktrees,
   PlanTask,
   Recipe,
+  RecipeInfo,
   RunCtx,
   RunErrorKind,
   RunResult,
   RunResultTask,
+  RunSummary,
   StartOptions,
   Task,
   TaskResult,

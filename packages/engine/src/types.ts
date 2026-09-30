@@ -127,6 +127,24 @@ export interface RunResult {
   error?: { kind: RunErrorKind; message: string } | undefined;
 }
 
+/** A past run, read back from its trace folder (engine.runs()). */
+export interface RunSummary {
+  id: string;
+  finishedAt: string;
+  status: RunResult["status"];
+  ok: boolean;
+  costUsd: number;
+  durationMs: number;
+  tracePath: string;
+}
+
+/** A recipe's public description, for CLI help and the Electron form (engine.recipes()). */
+export interface RecipeInfo {
+  name: string;
+  description: string;
+  inputSchema: unknown; // JSON schema, from the recipe's Zod input
+}
+
 // ── Events ────────────────────────────────────────────────────
 export interface PlanTask {
   id: string;
@@ -169,6 +187,9 @@ export interface EngineRun {
 
 export interface Engine {
   start(name: string, input: unknown, opts?: StartOptions): EngineRun;
+  recipes(): RecipeInfo[]; // name, description, input schema of each recipe
+  runs(): Promise<RunSummary[]>; // past runs, from the trace folder
+  get(runId: string): EngineRun | undefined; // a run still in progress (reattach)
 }
 
 // ── Internal run context, threaded through the lifecycle ───────
