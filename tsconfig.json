@@ -1,9 +1,17 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "references": [
-    // Add each package/app as it gets its own tsconfig.json, e.g.:
-    // { "path": "packages/messenger" },
-    // { "path": "packages/engine" },
-    // { "path": "apps/desktop" }
-  ]
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  }
 }
