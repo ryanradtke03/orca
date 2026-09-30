@@ -12,12 +12,12 @@ const valid = (req: MessengerRequest) => {
 };
 
 describe("validateRequest", () => {
-  it.each([
+  it.each<[string, MessengerRequest]>([
     ["empty prompt", { prompt: "  " }],
     ["tools without cwd", { prompt: "x", tools: ["Edit"] }],
     ["missing cwd", { prompt: "x", cwd: "/nope/not/here" }],
     ["bad maxTurns", { prompt: "x", maxTurns: 0 }],
-  ] as const)("rejects %s", (_label, req) => {
+  ])("rejects %s", (_label, req) => {
     expect(validateRequest(req, defaults).ok).toBe(false);
   });
 

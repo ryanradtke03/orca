@@ -9,6 +9,7 @@
     "moduleDetection": "force",
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
+    "types": ["node"],
 
     // Emit
     "declaration": true,

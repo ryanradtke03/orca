@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { MessengerRequest } from "./types.js";
+import type { AbortSignalLike, MessengerRequest } from "./types.js";
 
 /** A request with every default filled in. Backends only ever see this. */
 export interface ValidRequest {
@@ -12,7 +12,7 @@ export interface ValidRequest {
   model: string | undefined;
   resume: string | undefined;
   timeoutMs: number;
-  signal: AbortSignal | undefined;
+  signal: AbortSignalLike | undefined;
 }
 
 export interface RequestDefaults {
