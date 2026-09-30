@@ -92,7 +92,9 @@ export async function runRecipe(
   } catch (err) {
     return fail("plan_failed", toMessage(err));
   }
-  if (!tasks || tasks.length === 0) return fail("plan_failed", "plan() returned no tasks");
+  if (!tasks) return fail("plan_failed", "plan() returned no tasks");
+  // An empty plan is a valid no-op (e.g. fix-ci finds the command already green):
+  // schedule nothing and let finish() decide the output.
 
   const graphError = validateGraph(tasks);
   if (graphError) return fail("plan_failed", graphError);
@@ -103,7 +105,7 @@ export async function runRecipe(
   });
 
   // 4. optional plan approval — a rejected plan cancels before any worker runs
-  if (ctx.approvePlan) {
+  if (ctx.approvePlan && tasks.length > 0) {
     ctx.emit({ type: "approval.needed", what: "plan" });
     const approved = await ctx.waitApproval();
     if (!approved) {

@@ -44,3 +44,29 @@ export function onlyTouches(globs: string[]): Gate {
     },
   };
 }
+
+// Copy a pattern without the global flag so repeated .test() calls aren't stateful.
+function stateless(pattern: RegExp): RegExp {
+  return pattern.global ? new RegExp(pattern.source, pattern.flags.replace("g", "")) : pattern;
+}
+
+/**
+ * Reject the attempt if it changed any file whose path matches one of the
+ * patterns — a deny-list on file names (matched against the changed paths, not
+ * their contents). The complement of onlyTouches: use it to protect tests,
+ * config, lockfiles, etc. from being edited to force a command green.
+ */
+export function noFileChanges(patterns: RegExp[]): Gate {
+  const matchers = patterns.map(stateless);
+  return {
+    name: "noFileChanges",
+    async check(ctx) {
+      const offending = ctx.changedFiles.filter((file) => matchers.some((m) => m.test(file)));
+      if (offending.length === 0) return { ok: true };
+      return {
+        ok: false,
+        reasons: offending.map((f) => `changed a protected file: ${f}`),
+      };
+    },
+  };
+}

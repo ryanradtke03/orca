@@ -5,6 +5,7 @@ export { exec } from "./exec.js";
 export {
   commandPasses,
   filesExist,
+  noFileChanges,
   noPattern,
   onlyTouches,
   runGates,

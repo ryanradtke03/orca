@@ -1,22 +1,36 @@
-import { commandPasses, defineRecipe, noPattern } from "@orchestra/engine";
+import { commandPasses, defineRecipe, noFileChanges, noPattern } from "@orchestra/engine";
 import { z } from "zod";
 
-/**
- * fix-ci: make a failing command pass. One task, one worker, two gates —
- * the command must exit 0, and the worker can't cheat by disabling type or lint checks.
- */
+const TEST_AND_CONFIG = [
+  /\.test\.[cm]?[jt]sx?$/,
+  /__tests__\//,
+  /^tsconfig.*\.json$/,
+  /^package\.json$/,
+  /vitest\.config/,
+];
+const CHEATS = [
+  /@ts-ignore/,
+  /@ts-expect-error/,
+  /@ts-nocheck/,
+  /eslint-disable/,
+  /\.(skip|only)\(/,
+  /\bas any\b/,
+];
+
 export const fixCi = defineRecipe({
   name: "fix-ci",
-  description: "Make a failing command pass",
-  input: z.object({ command: z.string() }), // e.g. "pnpm tsc --noEmit"
+  description: "Make a failing command pass without touching tests or config",
+  input: z.object({ command: z.string().default("pnpm check") }),
 
-  async plan(input) {
+  async plan(input, ctx) {
+    const first = await ctx.exec(input.command);
+    if (first.code === 0) return []; // already green: no worker
     return [
       {
         id: "fix",
         goal: `Make \`${input.command}\` pass`,
         dependsOn: [],
-        context: input,
+        context: { command: input.command, failure: tail(first.output, 6000) },
       },
     ];
   },
@@ -24,21 +38,37 @@ export const fixCi = defineRecipe({
   worker: (task) => {
     const command = String(task.context["command"]);
     return {
-      prompt: `${task.goal}. Run it, read the errors, fix the code. Don't disable checks or add ts-ignore.`,
-      tools: ["Read", "Edit", "Grep", "Glob", `Bash(${command})`],
+      prompt: [
+        `${task.goal}. Fix the root cause in the source code.`,
+        `Current failure:\n\`\`\`\n${String(task.context["failure"])}\n\`\`\``,
+      ].join("\n\n"),
+      tools: [
+        "Read",
+        "Edit",
+        "Grep",
+        "Glob",
+        `Bash(${command})`,
+        "Bash(pnpm test:*)",
+        "Bash(pnpm typecheck:*)",
+      ],
       maxTurns: 25,
     };
   },
 
   gates: [
-    commandPasses((task) => String(task.context["command"])), // the command must exit 0
-    noPattern([/@ts-ignore/, /eslint-disable/]), // no cheating
+    noFileChanges(TEST_AND_CONFIG), // cheap: file names only
+    noPattern(CHEATS), // cheap: added lines only
+    commandPasses((task) => String(task.context["command"])), // expensive: run it
   ],
 
   async finish(results) {
     return {
-      fixed: results.every((r) => r.ok),
+      fixed: results.every((r) => r.ok), // [] (already green) → true
       diffs: results.map((r) => r.diff),
     };
   },
 });
+
+function tail(s: string, max: number) {
+  return s.length > max ? "…" + s.slice(-max) : s;
+}

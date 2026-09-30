@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { exec } from "../src/exec.js";
-import { commandPasses, filesExist, noPattern, onlyTouches } from "../src/gates/index.js";
+import {
+  commandPasses,
+  filesExist,
+  noFileChanges,
+  noPattern,
+  onlyTouches,
+} from "../src/gates/index.js";
 import type { GateContext, Task } from "../src/types.js";
 import { cleanup, makeScratchRepo, write } from "./helpers.js";
 
@@ -92,6 +98,29 @@ describe("onlyTouches", () => {
     const gate = onlyTouches(["*.ts"]);
     expect((await gate.check(gctx("/tmp", { changedFiles: ["a.ts"] }))).ok).toBe(true);
     expect((await gate.check(gctx("/tmp", { changedFiles: ["src/a.ts"] }))).ok).toBe(false);
+  });
+});
+
+describe("noFileChanges", () => {
+  const protectedPaths = [/\.test\.[cm]?[jt]sx?$/, /^package\.json$/];
+
+  it("passes when no changed file matches a protected pattern", async () => {
+    const res = await noFileChanges(protectedPaths).check(
+      gctx("/tmp", { changedFiles: ["src/a.ts", "src/b.ts"] }),
+    );
+    expect(res.ok).toBe(true);
+  });
+
+  it("fails and names each protected file that changed", async () => {
+    const res = await noFileChanges(protectedPaths).check(
+      gctx("/tmp", { changedFiles: ["src/a.ts", "src/a.test.ts", "package.json"] }),
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reasons.some((r) => r.includes("a.test.ts"))).toBe(true);
+      expect(res.reasons.some((r) => r.includes("package.json"))).toBe(true);
+      expect(res.reasons.some((r) => r.includes("src/a.ts"))).toBe(false);
+    }
   });
 });
 
