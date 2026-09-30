@@ -22,3 +22,6 @@ pnpm-debug.log*
 
 # os / editor
 .DS_Store
+
+# generated diagram validation artifacts (archify)
+*.visual-check.*
