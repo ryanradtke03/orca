@@ -1,0 +1,41 @@
+{
+  "request": {
+    "prompt": "say hi in 3 words",
+    "tools": [],
+    "cwd": "/var/folders/b2/q7p7ppxs1vj2g53lz1f0d4300000gn/T",
+    "maxTurns": 1,
+    "model": "sonnet",
+    "timeoutMs": 300000
+  },
+  "args": [
+    "-p",
+    "say hi in 3 words",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--max-turns",
+    "1",
+    "--model",
+    "sonnet",
+    "--strict-mcp-config",
+    "--disallowedTools",
+    "Bash,Edit,Write,MultiEdit,NotebookEdit,Read,Grep,Glob,WebFetch,WebSearch,Task,TodoWrite"
+  ],
+  "done": {
+    "type": "done",
+    "ok": true,
+    "text": "Hi there, user!",
+    "sessionId": "ee6e30d3-1d59-4e2a-bfd9-4c547c101fda",
+    "costUsd": 0.0231746,
+    "turns": 1
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "aborted": false
+  },
+  "stderrTail": "",
+  "startedAt": "2026-09-30T00:54:37.520Z",
+  "durationMs": 2743
+}

@@ -1,0 +1,45 @@
+{
+  "request": {
+    "prompt": "Read notes.txt and tell me the secret word",
+    "tools": [
+      "Read"
+    ],
+    "cwd": "/var/folders/b2/q7p7ppxs1vj2g53lz1f0d4300000gn/T/orca-record-UyHbVu",
+    "maxTurns": 5,
+    "model": "sonnet",
+    "timeoutMs": 300000
+  },
+  "args": [
+    "-p",
+    "Read notes.txt and tell me the secret word",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--max-turns",
+    "5",
+    "--model",
+    "sonnet",
+    "--strict-mcp-config",
+    "--allowedTools",
+    "Read",
+    "--permission-mode",
+    "acceptEdits"
+  ],
+  "done": {
+    "type": "done",
+    "ok": true,
+    "text": "The secret word is **teal**.",
+    "sessionId": "f475a194-0241-454a-a7f0-80e13c7d5020",
+    "costUsd": 0.0388812,
+    "turns": 2
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "timedOut": false,
+    "aborted": false
+  },
+  "stderrTail": "",
+  "startedAt": "2026-09-30T00:54:40.615Z",
+  "durationMs": 3104
+}

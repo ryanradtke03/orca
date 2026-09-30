@@ -1,0 +1,49 @@
+{
+  "request": {
+    "prompt": "Read every file here one by one",
+    "tools": [
+      "Read",
+      "Glob"
+    ],
+    "cwd": "/var/folders/b2/q7p7ppxs1vj2g53lz1f0d4300000gn/T/orca-record-FXfh7e",
+    "maxTurns": 1,
+    "model": "sonnet",
+    "timeoutMs": 300000
+  },
+  "args": [
+    "-p",
+    "Read every file here one by one",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--max-turns",
+    "1",
+    "--model",
+    "sonnet",
+    "--strict-mcp-config",
+    "--allowedTools",
+    "Read,Glob",
+    "--permission-mode",
+    "acceptEdits"
+  ],
+  "done": {
+    "type": "done",
+    "ok": false,
+    "sessionId": "86ec27a6-4c13-40f4-94c4-c5095f4b2f35",
+    "costUsd": 0.0346632,
+    "turns": 2,
+    "error": {
+      "kind": "claude_error",
+      "message": "error_max_turns"
+    }
+  },
+  "exit": {
+    "code": 1,
+    "signal": null,
+    "timedOut": false,
+    "aborted": false
+  },
+  "stderrTail": "",
+  "startedAt": "2026-09-30T00:54:44.086Z",
+  "durationMs": 2942
+}

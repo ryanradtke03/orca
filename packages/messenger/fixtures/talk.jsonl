@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/tmp","session_id":"talk-1","tools":["Read"],"mcp_servers":[],"model":"claude-sonnet"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hi there, friend!"}]},"session_id":"talk-1"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"}}
+{"duration_ms":1500,"num_turns":1,"result":"Hi there, friend!","session_id":"talk-1","total_cost_usd":0.0055,"subtype":"success","is_error":false,"type":"result"}
