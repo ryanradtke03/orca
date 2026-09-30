@@ -94,6 +94,6 @@ console.log(
     2,
   ),
 );
-console.log("\n=== diff ===\n" + diff);
+console.log(`\n=== diff ===\n${diff}`);
 console.log(pass ? "\n✅ Phase 1 skeleton works: a diff came back." : "\n❌ skeleton check FAILED");
 process.exit(pass ? 0 : 1);

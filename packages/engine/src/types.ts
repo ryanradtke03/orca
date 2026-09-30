@@ -102,6 +102,7 @@ export type RunErrorKind =
   | "invalid_input"
   | "unknown_recipe"
   | "plan_failed"
+  | "finish_failed"
   | "budget"
   | "timeout"
   | "cancelled";
@@ -137,7 +138,17 @@ export type EngineEvent =
   | { type: "task.retrying"; taskId: string; attempt: number; reasons: string[] }
   | { type: "task.done"; taskId: string; attempts: number; costUsd: number }
   | { type: "task.failed"; taskId: string; reasons: string[] }
+  | { type: "budget.warning"; resource: "cost" | "duration"; used: number; limit: number }
   | { type: "run.done"; result: RunResult };
+
+// Tracks a run's cost and duration against the limits (design §12, budget.ts).
+export interface Budget {
+  add(costUsd: number): void;
+  costUsed(): number;
+  elapsedMs(): number;
+  /** The kind of cap that's been hit, or null if there's still room. */
+  exceeded(): "budget" | "timeout" | null;
+}
 
 // ── Public surface ────────────────────────────────────────────
 export interface EngineRun {
@@ -156,4 +167,7 @@ export interface Engine {
 export interface RunCtx extends Ctx {
   runId: string;
   limits: EngineLimits;
+  budget: Budget;
+  keepWorktrees: KeepWorktrees;
+  worktreeDir?: string | undefined;
 }

@@ -1,7 +1,7 @@
 // Git worktree plumbing. Each task attempt gets a fresh worktree on its own
 // branch, cut from the repo's current HEAD, so a worker never touches your checkout.
 import { execFile } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { appendFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -68,4 +68,36 @@ export async function removeWorktree(repo: string, worktree: string): Promise<vo
     // fall through to a plain rm if git can't
   }
   await rm(worktree, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Drop git's records of worktrees whose directories are gone. Never throws. */
+export async function pruneWorktrees(repo: string): Promise<void> {
+  await git(repo, ["worktree", "prune"]).catch(() => {});
+}
+
+/** Remove every worktree for a run at once (used on cancel), then prune. */
+export async function removeRunWorktrees(
+  repo: string,
+  runId: string,
+  worktreeDir?: string,
+): Promise<void> {
+  const dir = path.join(worktreeRoot(repo, worktreeDir), runId);
+  await rm(dir, { recursive: true, force: true }).catch(() => {});
+  await pruneWorktrees(repo);
+}
+
+/**
+ * Make sure the repo ignores .orchestra/ even if it isn't in .gitignore, by
+ * adding it to .git/info/exclude. Best-effort: never throws.
+ */
+export async function ensureExcluded(repo: string): Promise<void> {
+  const excludePath = path.join(repo, ".git", "info", "exclude");
+  try {
+    const current = await readFile(excludePath, "utf8").catch(() => "");
+    if (current.split("\n").some((line) => line.trim() === ".orchestra/")) return;
+    const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
+    await appendFile(excludePath, `${prefix}.orchestra/\n`);
+  } catch {
+    // best effort — a non-standard .git layout just doesn't get the exclude
+  }
 }

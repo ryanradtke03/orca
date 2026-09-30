@@ -1,9 +1,11 @@
+import { createBudget } from "./budget.js";
 import { runRecipe } from "./lifecycle.js";
 import { createEngineRun } from "./run.js";
 import type {
   Engine,
   EngineConfig,
   EngineLimits,
+  KeepWorktrees,
   RunCtx,
   RunResult,
   StartOptions,
@@ -24,6 +26,7 @@ function newRunId(): string {
 
 export function createEngine(config: EngineConfig): Engine {
   const baseLimits: EngineLimits = { ...DEFAULT_LIMITS, ...config.limits };
+  const keepWorktrees: KeepWorktrees = config.keepWorktrees ?? "on-failure";
 
   return {
     start(name, input, opts?: StartOptions) {
@@ -31,19 +34,7 @@ export function createEngine(config: EngineConfig): Engine {
       const limits: EngineLimits = { ...baseLimits, ...opts?.limits };
       const recipe = config.recipes[name];
 
-      return createEngineRun(id, async (emit, signal): Promise<RunResult> => {
-        if (!recipe) {
-          return {
-            ok: false,
-            status: "failed",
-            tasks: [],
-            costUsd: 0,
-            durationMs: 0,
-            tracePath: "",
-            error: { kind: "unknown_recipe", message: `No recipe named "${name}"` },
-          };
-        }
-
+      const run = createEngineRun(id, async (emit, signal): Promise<RunResult> => {
         const ctx: RunCtx = {
           repo: config.repo,
           messenger: config.messenger,
@@ -51,9 +42,20 @@ export function createEngine(config: EngineConfig): Engine {
           emit,
           runId: id,
           limits,
+          budget: createBudget(limits, emit),
+          keepWorktrees,
+          worktreeDir: config.worktreeDir,
         };
-        return runRecipe(recipe, input, ctx);
+        return runRecipe(recipe, name, input, ctx);
       });
+
+      // Let a caller-supplied signal cancel the run too.
+      if (opts?.signal) {
+        if (opts.signal.aborted) run.cancel();
+        else opts.signal.addEventListener("abort", () => run.cancel(), { once: true });
+      }
+
+      return run;
     },
   };
 }

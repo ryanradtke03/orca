@@ -19,7 +19,10 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
   let lastWorktree = "";
 
   for (let attempt = 1; attempt <= ctx.limits.maxAttempts; attempt++) {
-    const worktree = await createWorktree(ctx.repo, ctx.runId, task.id, attempt);
+    // Stop retrying if the run was cancelled or ran out of budget mid-task.
+    if (ctx.signal.aborted || ctx.budget.exceeded()) break;
+
+    const worktree = await createWorktree(ctx.repo, ctx.runId, task.id, attempt, ctx.worktreeDir);
     lastWorktree = worktree.path;
     ctx.emit({ type: "task.started", taskId: task.id, attempt, worktree: worktree.path });
 
@@ -38,6 +41,7 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
     }
     const done = await run.done;
     costUsd += done.costUsd ?? 0;
+    ctx.budget.add(done.costUsd ?? 0);
 
     const diff = await getDiff(worktree.path);
 
@@ -71,7 +75,7 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
     feedback = reasons;
     if (attempt < ctx.limits.maxAttempts) {
       ctx.emit({ type: "task.retrying", taskId: task.id, attempt, reasons });
-      await removeWorktree(ctx.repo, worktree.path); // discard between attempts; keep the last one
+      await removeWorktree(ctx.repo, worktree.path); // discard failed attempts; keep the last one
     }
   }
 

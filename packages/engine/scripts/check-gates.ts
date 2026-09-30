@@ -171,9 +171,10 @@ const check = (label: string, ok: boolean) => {
   const result = await run.done;
   const retries = events.filter((e) => e.type === "task.retrying").length;
   check(
+    // The only task fails, so the whole run is "failed" (Phase 3 status semantics).
     "case 3: 3 attempts, 2 retries, then failed with reasons",
     !result.ok &&
-      result.status === "partial" &&
+      result.status === "failed" &&
       result.tasks[0]?.attempts === 3 &&
       retries === 2 &&
       (result.tasks[0]?.failures?.length ?? 0) > 0 &&
