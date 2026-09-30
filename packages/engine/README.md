@@ -72,36 +72,162 @@ Rule of thumb: if the same decision logic shows up in two recipes, it belongs in
 
 ## API
 
-```ts
-createEngine(config)            → engine        // one per app
-engine.start(recipe, input, opts?) → run        // starts immediately
-engine.recipes()                → RecipeInfo[]  // name, description, JSON schema
-engine.runs()                   → RunSummary[]  // past runs, from traceDir
-engine.get(runId)               → run | undefined  // a live run, to reattach
+At a glance:
 
-run.id                          // also the trace folder name
-run.events                      → AsyncIterable<EngineEvent>
-run.done                        → Promise<RunResult>   // always resolves
-run.cancel()                    // kills workers, cleans worktrees, ends "cancelled"
-run.approve(ok)                 // answers an approval.needed event
+```ts
+createEngine(config)                 → Engine            // one per app
+engine.start(recipe, input, opts?)   → EngineRun         // starts immediately
+engine.recipes()                     → RecipeInfo[]      // sync
+engine.runs()                        → Promise<RunSummary[]>
+engine.get(runId)                    → EngineRun | undefined
+
+run.id                               : string
+run.events                           : AsyncIterable<EngineEvent>
+run.done                             : Promise<RunResult> // always resolves
+run.cancel()                         → void
+run.approve(ok: boolean)             → void
 ```
 
-### `createEngine(config)`
+---
 
-| Option | Default | Description |
+### `createEngine(config)` → `Engine`
+
+Builds one engine. Cheap and synchronous — nothing runs until `start()`. You normally make one per app (CLI, Electron main process, backend) and reuse it.
+
+```ts
+const engine = createEngine({
+  repo: "/path/to/repo",
+  messenger: createMessenger({ backend: "cli" }),
+  recipes: builtInRecipes,
+  limits: { maxWorkers: 2, maxCostUsd: 3 },
+  traceDir: ".orchestra/runs",
+});
+```
+
+**`config: EngineConfig`**
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `repo` | `string` | **required** | Absolute path to the git repo the engine works on. Worktrees are cut from its current `HEAD`. |
+| `messenger` | `Messenger` | **required** | Anything implementing `Messenger.send()` — the real CLI backend, the test `ScriptedMessenger`, or a future SDK backend. |
+| `recipes` | `Record<string, Recipe>` | **required** | The registry `start()` looks names up in. A name that isn't here → `unknown_recipe`. |
+| `limits` | `Partial<EngineLimits>` | see below | Run caps. Any subset; the rest fall back to defaults. |
+| `worktreeDir` | `string` | `<repo>/.orchestra/worktrees` | Where per-task worktrees are created. Gitignored, and auto-added to `.git/info/exclude`. |
+| `traceDir` | `string` | _none_ | If set, each run writes `events.jsonl` + `summary.json` under `<traceDir>/<runId>/`. Required for `engine.runs()` to return anything. |
+| `keepWorktrees` | `"always" \| "on-failure" \| "never"` | `"on-failure"` | What to do with worktrees after a run. `on-failure` keeps only failed tasks' worktrees for debugging; a cancelled run always cleans everything. |
+
+**`EngineLimits`** (all optional in `config.limits`, filled with these defaults):
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `maxWorkers` | `number` | `2` | How many tasks may run at the same time. |
+| `maxAttempts` | `number` | `3` | Worker attempts per task before it's marked failed. |
+| `maxCostUsd` | `number` | `3` | Total USD across all workers in the run. Re-checked between scheduling waves; when hit, the run stops as `partial` with `error.kind: "budget"`. |
+| `maxDurationMs` | `number` | `1_800_000` (30 min) | Wall-clock cap for the run → `partial` / `timeout`. |
+
+> **Budget granularity.** Cost and time are checked _between_ tasks/waves, not mid-worker. With `maxWorkers > 2`, several tasks in one wave can push spend past `maxCostUsd` before the next check — you can't un-spend a worker that's already running. A `budget.warning` event fires once at 80% of each cap.
+
+---
+
+### `engine.start(name, input, opts?)` → `EngineRun`
+
+Starts a job **immediately** and returns a handle. Never throws — a bad name, bad input, or a crash all come back through `run.done` as a `RunResult` with `ok: false`.
+
+```ts
+const run = engine.start("fix-ci", { command: "npx tsc --noEmit" }, {
+  signal: controller.signal,
+  approvePlan: true,
+  limits: { maxCostUsd: 1 },
+});
+```
+
+**Parameters**
+
+| Param | Type | Description |
 | --- | --- | --- |
-| `repo` | required | git repo the engine works on |
-| `messenger` | required | any `Messenger` (CLI, scripted, later SDK) |
-| `recipes` | required | `Record<name, Recipe>` registry |
-| `limits.maxWorkers` | `2` | tasks running at the same time |
-| `limits.maxAttempts` | `3` | worker attempts per task before giving up |
-| `limits.maxCostUsd` | `3` | per run; the run stops when reached |
-| `limits.maxDurationMs` | `30 min` | per run |
-| `worktreeDir` | `.orchestra/worktrees` | where task worktrees go (gitignored) |
-| `traceDir` | _none_ | if set, write `events.jsonl` + `summary.json` per run |
-| `keepWorktrees` | `"on-failure"` | `"always" \| "on-failure" \| "never"` |
+| `name` | `string` | Key into the `recipes` registry. Unknown → run ends `unknown_recipe`. |
+| `input` | `unknown` | Validated against the recipe's Zod `input` schema before anything runs. Invalid → `invalid_input`, and **no worker is spawned**. |
+| `opts?` | `StartOptions` | Per-run overrides (below). |
 
-`start()` also takes `opts`: `signal` (an `AbortSignal` to cancel), `approvePlan` (pause for `run.approve()`), and per-run `limits`.
+**`opts: StartOptions`** (all optional)
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `signal` | `AbortSignal` | _none_ | A caller-owned signal. Aborting it is equivalent to `run.cancel()`: workers stop, worktrees are cleaned, the run ends `cancelled`. Passing an already-aborted signal cancels immediately. |
+| `approvePlan` | `boolean` | `false` | When `true`, after planning the run emits `plan.ready` then `approval.needed` and **waits** for `run.approve(ok)`. `approve(false)` (or a cancel) ends the run `cancelled` before any worker runs. |
+| `limits` | `Partial<EngineLimits>` | inherits `config.limits` | Overrides just for this run, merged over the engine's limits. |
+
+---
+
+### `engine.recipes()` → `RecipeInfo[]`
+
+Synchronous. Describes every registered recipe — for CLI `--help`, an Electron dropdown, or building an input form.
+
+```ts
+interface RecipeInfo {
+  name: string;
+  description: string;
+  inputSchema: unknown; // JSON Schema, generated from the recipe's Zod input
+}
+```
+
+`inputSchema` comes from `z.toJSONSchema(recipe.input)`; a schema Zod can't serialize yields `{}` rather than throwing.
+
+---
+
+### `engine.runs()` → `Promise<RunSummary[]>`
+
+Reads finished runs back from `traceDir`, **newest first**. Returns `[]` if no `traceDir` is configured or the folder doesn't exist yet.
+
+```ts
+interface RunSummary {
+  id: string;         // == the run's id / trace folder name
+  finishedAt: string; // ISO timestamp
+  status: "completed" | "partial" | "failed" | "cancelled";
+  ok: boolean;
+  costUsd: number;
+  durationMs: number;
+  tracePath: string;  // <traceDir>/<id>
+}
+```
+
+To load a past run's full detail, read `summary.json` (the `RunResult`) or `events.jsonl` under `tracePath`.
+
+---
+
+### `engine.get(runId)` → `EngineRun | undefined`
+
+Returns a run **still in progress**, so a UI can reattach to its `events`/`done` after navigating away. Backed by an in-memory registry that clears the moment a run finishes, so a completed run returns `undefined` — use `runs()` for history.
+
+---
+
+### The `EngineRun` handle
+
+Returned by `start()` (and `get()`).
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `id` | `string` | The run id, also its trace folder name. Generated as `run-<timestamp>-<rand>`. |
+| `events` | `AsyncIterable<EngineEvent>` | The live event stream. Iterate with `for await`. Yields until `run.done` (a `run.done` event is the last item), then completes. Not iterating does **not** stall the run — `done` resolves regardless. |
+| `done` | `Promise<RunResult>` | Resolves once, with the final result. **Never rejects** — failures are `ok: false` with an `error.kind`. |
+| `cancel()` | `() => void` | Aborts the run: signals workers via the messenger, cleans up worktrees, and ends the run `cancelled`. Safe to call any time (including while paused for approval, which it resolves as rejected). |
+| `approve(ok)` | `(ok: boolean) => void` | Answers an `approval.needed` prompt. `true` proceeds; `false` cancels. No-op if the run isn't waiting on approval. |
+
+A typical consumer reads both — the stream for progress, the promise for the outcome:
+
+```ts
+const run = engine.start("fix-ci", { command: "npx tsc --noEmit" });
+
+for await (const e of run.events) {
+  if (e.type === "task.started") console.log(`▶ ${e.taskId} (attempt ${e.attempt})`);
+  if (e.type === "gate.failed")  console.log(`  ✗ ${e.gate}: ${e.reasons.join("; ")}`);
+  if (e.type === "task.done")    console.log(`  ✓ ${e.taskId} $${e.costUsd.toFixed(3)}`);
+}
+
+const result = await run.done;
+```
+
+> In a request/response server, don't `await run.done` inside the handler — jobs take minutes. Return `run.id`, then stream `engine.get(id).events` over SSE and let the run finish in the background.
 
 ---
 
@@ -140,13 +266,81 @@ Tasks can depend on each other; independent tasks run in parallel up to `maxWork
 
 The built-in recipes live in [`@orchestra/recipes`](../recipes): `fix-ci` and `add-component` (which fans out a component into a parallel test + story).
 
+### Contract reference
+
+Every hook the engine calls, and when:
+
+| Hook | Signature | Called | Decides |
+| --- | --- | --- | --- |
+| `input` | `z.ZodType<Input>` | before anything runs | the shape of valid input; invalid → `invalid_input` |
+| `plan` | `(input, ctx) => Promise<Task[]>` | once, after validation | which tasks exist and their dependencies |
+| `worker` | `(task, ctx) => WorkerConfig` | per task attempt | how that attempt's Claude call runs |
+| `gates` | `Gate[]` | after each attempt | whether the attempt counts as done |
+| `onFailed?` | `(task, reasons, ctx) => Promise<void>` | when a task exhausts `maxAttempts` | side effects on give-up (quarantine, report…) |
+| `finish` | `(results, ctx) => Promise<Output>` | once, after all tasks | the run's `output` |
+
+`defineRecipe({ ... })` is just an identity helper that infers `Input` from the Zod schema so `plan`/`worker`/`finish` are fully typed.
+
+**`Task`** — one unit of work. `context` is your bag of per-task data (read it back in `worker`/`gates`).
+
+```ts
+interface Task { id: string; goal: string; dependsOn: string[]; context: Record<string, unknown>; }
+```
+
+**`WorkerConfig`** — what `worker()` returns; passed straight to `messenger.send()`.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `prompt` | `string` | The task prompt. On a retry, the engine prepends the previous attempt's rejection reasons. |
+| `tools` | `string[]` | Allowed tools, e.g. `["Read", "Edit", "Bash(npm test)"]`. |
+| `allowEdits?` | `string[]` | Path globs the worker should stay within (enforce with the `onlyTouches` gate). |
+| `maxTurns?` | `number` | Cap on the worker's turns. |
+| `model?` | `string` | e.g. `"sonnet"`, `"haiku"`. |
+| `system?` | `string` | Extra system prompt. |
+
+**`ctx: Ctx`** — passed to `plan`/`worker`/`gates`/`finish`. The engine owns it; recipes read from it.
+
+| Member | Type | Use |
+| --- | --- | --- |
+| `repo` | `string` | The target repo path. |
+| `messenger` | `Messenger` | For recipes that run their own planner/triage agents via `askJson`. |
+| `signal` | `AbortSignal` | Aborted when the run is cancelled. |
+| `emit` | `(event) => void` | Emit a custom engine event onto the stream. |
+
+**`Gate` / `GateContext`** — a gate is `{ name, check(ctx) }` returning `{ ok: true }` or `{ ok: false, reasons }`. Its `ctx` gives the evidence:
+
+```ts
+interface GateContext {
+  worktree: string;                     // the attempt's checkout
+  task: Task;
+  diff: string;                         // staged diff vs HEAD
+  changedFiles: string[];
+  exec(cmd, opts?): Promise<{ code; stdout; stderr }>; // run a command in the worktree
+}
+```
+
 ---
 
 ## Events & results
 
-`run.events` streams typed `EngineEvent`s: `run.started`, `plan.ready`, `approval.needed`, `task.started`, `worker.event` (the messenger's own events, tagged with a task id), `gate.passed` / `gate.failed`, `task.retrying`, `task.done` / `task.failed` / `task.skipped`, `budget.warning`, and finally `run.done`.
+`run.events` streams typed `EngineEvent`s. Every event has a `type`; the discriminated union means narrowing on `type` gives you the right fields.
 
-`run.done` resolves to a `RunResult`:
+| `type` | Fires when | Key fields |
+| --- | --- | --- |
+| `run.started` | input validated, job accepted | `recipe`, `input` |
+| `plan.ready` | tasks decided | `tasks: { id, goal, dependsOn }[]` |
+| `approval.needed` | waiting on `run.approve()` (only with `approvePlan`) | `what` (e.g. `"plan"`) |
+| `task.started` | a worker attempt began | `taskId`, `attempt`, `worktree` |
+| `worker.event` | a messenger event from that worker | `taskId`, `event` (the raw `MessengerEvent`) |
+| `gate.passed` / `gate.failed` | a gate ran | `taskId`, `gate`, (`reasons` on fail) |
+| `task.retrying` | gates failed, trying again | `taskId`, `attempt`, `reasons` |
+| `task.done` | a task succeeded | `taskId`, `attempts`, `costUsd` |
+| `task.failed` | a task exhausted its attempts | `taskId`, `reasons` |
+| `task.skipped` | a dependency failed/was skipped | `taskId`, `reason` |
+| `budget.warning` | 80% of a cap reached | `resource` (`"cost"`/`"duration"`), `used`, `limit` |
+| `run.done` | the end | `result` (the `RunResult`) |
+
+`run.done` (the promise) resolves to a `RunResult`:
 
 ```ts
 interface RunResult {
