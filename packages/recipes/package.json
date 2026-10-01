@@ -11,7 +11,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "demo": "tsx scripts/run.ts"
+    "demo": "tsx scripts/run.ts",
+    "scenarios": "tsx scripts/scenarios.ts"
   },
   "dependencies": {
     "@orchestra/engine": "workspace:*",

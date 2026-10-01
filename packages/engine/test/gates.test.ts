@@ -99,6 +99,23 @@ describe("onlyTouches", () => {
     expect((await gate.check(gctx("/tmp", { changedFiles: ["a.ts"] }))).ok).toBe(true);
     expect((await gate.check(gctx("/tmp", { changedFiles: ["src/a.ts"] }))).ok).toBe(false);
   });
+
+  it("reads the allow-list from the task", async () => {
+    const gate = onlyTouches((t) => t.context["files"] as string[]);
+    const ctx = gctx("/tmp", {
+      task: task({ files: ["src/a.ts", "src/b.ts"] }),
+      changedFiles: ["src/a.ts"],
+    });
+    expect((await gate.check(ctx)).ok).toBe(true);
+
+    const outside = gctx("/tmp", {
+      task: task({ files: ["src/a.ts"] }),
+      changedFiles: ["src/a.ts", "src/c.ts"],
+    });
+    const res = await gate.check(outside);
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("src/c.ts");
+  });
 });
 
 describe("noFileChanges", () => {

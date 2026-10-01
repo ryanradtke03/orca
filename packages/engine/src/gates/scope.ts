@@ -1,4 +1,4 @@
-import type { Gate } from "../types.js";
+import type { Gate, Task } from "../types.js";
 
 // Minimal glob → RegExp: `*` matches within a path segment, `**` matches across
 // segments, `?` matches one non-slash char. Enough for allow-lists like
@@ -29,12 +29,17 @@ function globToRegExp(glob: string): RegExp {
 /**
  * Reject the attempt if it changed any file outside the allowed globs.
  * Enforces a recipe's `allowEdits` after the fact, from the diff.
+ *
+ * `globs` may be a fixed list, or a function of the task — so a recipe can scope
+ * edits to files it discovered in plan() (e.g. the files that had lint errors),
+ * the same way `commandPasses` reads its command from the task.
  */
-export function onlyTouches(globs: string[]): Gate {
-  const matchers = globs.map(globToRegExp);
+export function onlyTouches(globs: string[] | ((task: Task) => string[])): Gate {
   return {
     name: "onlyTouches",
     async check(ctx) {
+      const allowed = typeof globs === "function" ? globs(ctx.task) : globs;
+      const matchers = allowed.map(globToRegExp);
       const offending = ctx.changedFiles.filter((file) => !matchers.some((m) => m.test(file)));
       if (offending.length === 0) return { ok: true };
       return {
