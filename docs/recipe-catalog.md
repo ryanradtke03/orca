@@ -54,7 +54,7 @@ Skills improve the agent. Recipes verify the agent. Code, not Claude, decides wh
 | `i18n-extract`                    | later   | Move hardcoded UI text into translation files              | Needed before launching in another language                | No-hardcoded-strings lint passes, rendered text unchanged                           | Lint + snapshot gates                               |
 | `build-feature`                   | later   | Spec → tickets → build                                     | The flagship demo                                          | Each ticket's gates, then an integration gate on the merged result                  | Dynamic task graphs, child runs, merging worktrees  |
 | Read-only (no code edits)         |         |                                                            |                                                            |                                                                                     |                                                     |
-| [`pr-review` →](#pr-review)       | next    | First-pass review of a diff                                | Saves reviewer time on the obvious stuff                   | Output matches a Zod schema; every comment points to a real line in the diff        | Read-only worker, `askJson` output                  |
+| [`pr-review` →](#pr-review)       | built   | First-pass review of a diff                                | Saves reviewer time on the obvious stuff                   | Output matches a Zod schema; every comment points to a real line in the diff        | Read-only worker, structured output in gates        |
 | `ci-triage`                       | planned | Classify a red build: flaky, infra or real bug             | Routes the failure to the right fix                        | Output matches the schema; label accuracy tracked over time                         | Routing; feeds chains                               |
 | `docs-sync`                       | later   | Update README and docs examples that drifted               | Wrong docs cost more than no docs                          | Every code snippet in the docs compiles and runs                                    | Turns docs into something checkable                 |
 
@@ -1319,9 +1319,9 @@ Issue or report → [`repro-bug`](#repro-bug) (test must fail) → Commit test t
 
 | Piece                                                                    | Status | Spec                                                                              |
 |--------------------------------------------------------------------------|--------|-----------------------------------------------------------------------------------|
-| `repro-bug`                                                              | next   | [repro-bug →](#repro-bug)                                                         |
+| `repro-bug`                                                              | built  | [repro-bug →](#repro-bug)                                                         |
 | `fix-ci`                                                                 | built  | [fix-ci →](#fix-ci) No changes to the recipe; it runs at a different base (below) |
-| `pr-review`                                                              | next   | [pr-review →](#pr-review)                                                         |
+| `pr-review`                                                              | built  | [pr-review →](#pr-review)                                                         |
 | Engine: base refs, git helpers, child runs, chains, task output, PR sink | next   | [Composition (engine) →](#composition)                                            |
 
 **The hidden problem this chain exposes:** today every worktree, and every `ctx.exec` in `plan()`, uses the repo at HEAD. The repro test from step 1 isn't at HEAD, so fix-ci's plan would run the test command, see "no such test file" or green, and either fail or return "already fixed". Runs need a **base ref**. That's the first engine change.
@@ -1636,7 +1636,7 @@ Turn a bug report into one test that fails on the current code, for the reason t
 
 ## Header
 
-- **Status:** next Spec written, not built
+- **Status:** built Verified on 5 scenarios with real Claude runs
 - **Category:** Testing
 - **Phase:** 2 · Tests that test (first used in Phase 5's Bug to PR)
 - **Effort:** 1–2 days: the recipe, two new gates, 5 scenarios
@@ -1851,13 +1851,13 @@ Review a branch's changes and return a structured verdict with comments pinned t
 
 ## Header
 
-- **Status:** next Spec written, not built
+- **Status:** built · Verified on 5 scenarios with real Claude runs (Oct 6, 2026): catch rate 3/3, 0 false alarms. See [the recipe doc](recipes/pr-review.md#scenarios).
 - **Category:** Read-only
 - **Phase:** 4 · Read-only workers
-- **Effort:** 2 days: schema, two new gates, seeded-diff scenarios
-- **Engine uses:** Base refs and task output from [Composition](#composition); `onlyTouches([])` to enforce read-only
+- **Effort:** ~1 day: schema, two new gates, task output in the engine, seeded-diff scenarios
+- **Engine uses:** worker task output (`GateContext.output`); `onlyTouches([])` to enforce read-only
 - **Gates used:** `onlyTouches` (exists)
-- **New engine work:** Gates `outputMatches` and `anchoredInDiff`
+- **New engine work:** worker task output (`GateContext.output`, `TaskResult.output`); gates `outputMatches` and `anchoredInDiff`. Base refs (worktree at `head`) deferred to [Composition](#composition)
 
 ## When to use it
 
@@ -1941,7 +1941,7 @@ worker: (task) => ({
 ```ts
 export const ReviewSchema = z.object({
   verdict: z.enum(["approve", "request_changes"]),
-  summary: z.string().max(600),
+  summary: z.string().max(1000),
   comments: z.array(z.object({
     file: z.string(),
     line: z.number().int(),

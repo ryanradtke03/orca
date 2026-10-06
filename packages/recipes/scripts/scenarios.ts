@@ -28,7 +28,7 @@ import {
   type RunResult,
 } from "@orchestra/engine";
 import { createMessenger } from "@orchestra/messenger";
-import { fixCi, fixLint, reproBug, updateTests } from "../src/index.js";
+import { fixCi, fixLint, prReview, reproBug, updateTests } from "../src/index.js";
 
 const run = promisify(execFile);
 let stopRequested = false; // set by Ctrl-C: finish cleanup, skip the remaining scenarios
@@ -41,6 +41,7 @@ const RECIPES = {
   "fix-lint": fixLint,
   "update-tests": updateTests,
   "repro-bug": reproBug,
+  "pr-review": prReview,
 };
 
 // Files a fix must never touch, re-checked here independently of the recipe's
@@ -147,6 +148,38 @@ const onlyReproFileChanged = (files: string[]): Check[] => [
     files.join(", "),
   ),
 ];
+
+// pr-review: the recipe edits nothing and returns a structured review in
+// RunResult.output. `base` is HEAD~1 because the harness commits each patch as one
+// commit on top of main, so `git diff HEAD~1...HEAD` is exactly the change under
+// review. The checks read the verdict and comments instead of a diff.
+const PR_INPUT = { base: "HEAD~1", head: "HEAD" };
+
+interface ReviewComment {
+  file: string;
+  line: number;
+  severity: "blocking" | "suggestion";
+  body: string;
+}
+interface ReviewOut {
+  verdict: "approve" | "request_changes";
+  summary: string;
+  comments: ReviewComment[];
+}
+
+/** The parsed review, or null if the run produced nothing review-shaped. */
+function reviewOf(r: RunResult): ReviewOut | null {
+  const o = r.output as Partial<ReviewOut> | undefined;
+  const ok =
+    o && (o.verdict === "approve" || o.verdict === "request_changes") && Array.isArray(o.comments);
+  return ok ? (o as ReviewOut) : null;
+}
+const allBlocking = (rev: ReviewOut | null): ReviewComment[] =>
+  rev ? rev.comments.filter((c) => c.severity === "blocking") : [];
+const blockingOn = (rev: ReviewOut | null, file: string): ReviewComment[] =>
+  allBlocking(rev).filter((c) => c.file === file);
+const nearLine = (comments: ReviewComment[], line: number, slack = 2): boolean =>
+  comments.some((c) => Math.abs(c.line - line) <= slack);
 
 const SCENARIOS: Scenario[] = [
   {
@@ -484,6 +517,115 @@ const SCENARIOS: Scenario[] = [
           : "Claude wrote only the repro test first try",
       ),
     ],
+  },
+
+  // ── pr-review ───────────────────────────────────────────────
+  {
+    name: "p-good",
+    patch: "p-good",
+    about: "a correct, behavior-preserving median refactor: the reviewer should approve",
+    recipe: "pr-review",
+    input: PR_INPUT,
+    expect: (r) => {
+      const rev = reviewOf(r);
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(rev !== null, "returned a well-formed review"),
+        hard(rev?.verdict === "approve", "verdict is approve", `got ${rev?.verdict ?? "none"}`),
+        hard(allBlocking(rev).length === 0, "no blocking comments"),
+      ];
+    },
+  },
+  {
+    name: "p-overfit",
+    patch: "p-overfit",
+    about: "special-cases the test input (length === 4): the reviewer should block it",
+    recipe: "pr-review",
+    input: { ...PR_INPUT, issue: "median([1, 2, 3, 4]) returns 3 but should be 2.5" },
+    expect: (r) => {
+      const rev = reviewOf(r);
+      const blk = blockingOn(rev, "src/stats.ts");
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(
+          rev?.verdict === "request_changes",
+          "verdict is request_changes",
+          `got ${rev?.verdict ?? "none"}`,
+        ),
+        hard(blk.length > 0, "a blocking comment on src/stats.ts"),
+        soft(
+          nearLine(blk, 10),
+          "blocking comment within 2 lines of the special case (line 10)",
+          `lines: ${blk.map((c) => c.line).join(", ") || "none"}`,
+        ),
+      ];
+    },
+  },
+  {
+    name: "p-side-effect",
+    patch: "p-side-effect",
+    about: "sorts in place, so median now mutates its argument: the reviewer should block it",
+    recipe: "pr-review",
+    input: { ...PR_INPUT, issue: "make median faster" },
+    expect: (r) => {
+      const rev = reviewOf(r);
+      const blk = blockingOn(rev, "src/stats.ts");
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(
+          rev?.verdict === "request_changes",
+          "verdict is request_changes",
+          `got ${rev?.verdict ?? "none"}`,
+        ),
+        hard(blk.length > 0, "a blocking comment on src/stats.ts"),
+        soft(
+          nearLine(blk, 9),
+          "blocking comment on the in-place sort (line 9)",
+          `lines: ${blk.map((c) => c.line).join(", ") || "none"}`,
+        ),
+      ];
+    },
+  },
+  {
+    name: "p-wrong-fix",
+    patch: "p-wrong-fix",
+    about: "issue is a cent-off Cart.total, but the diff edits formatCents: block as off-target",
+    recipe: "pr-review",
+    input: { ...PR_INPUT, issue: "Cart.total() is one cent too low on discounted carts" },
+    expect: (r) => {
+      const rev = reviewOf(r);
+      const blk = blockingOn(rev, "src/money.ts");
+      const onTopic = /address|issue|cart|total|unrelated|wrong place|does(n't| not)/i;
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(
+          rev?.verdict === "request_changes",
+          "verdict is request_changes",
+          `got ${rev?.verdict ?? "none"}`,
+        ),
+        hard(blk.length > 0, "a blocking comment on src/money.ts"),
+        soft(
+          blk.some((c) => onTopic.test(c.body)),
+          "a blocking comment says it doesn't address the issue",
+          blk.map((c) => c.body.slice(0, 70)).join(" | ") || "none",
+        ),
+      ];
+    },
+  },
+  {
+    name: "p-noise",
+    patch: "p-noise",
+    about: "a pure local rename (mid → middle): the reviewer should not invent blockers",
+    recipe: "pr-review",
+    input: PR_INPUT,
+    expect: (r) => {
+      const rev = reviewOf(r);
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(rev?.verdict === "approve", "verdict is approve", `got ${rev?.verdict ?? "none"}`),
+        hard(allBlocking(rev).length === 0, "no blocking comments (false-positive check)"),
+      ];
+    },
   },
 ];
 

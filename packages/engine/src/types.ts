@@ -50,6 +50,7 @@ export interface GateContext {
   task: Task;
   diff: string;
   changedFiles: string[];
+  output: string; // the worker's final message, for read-only recipes that gate on it
   exec(
     cmd: string,
     opts?: { timeoutMs?: number | undefined },
@@ -102,6 +103,7 @@ export interface TaskResult {
   attempts: number;
   costUsd: number;
   diff?: string | undefined;
+  output?: string | undefined; // the worker's final message on the accepted/last attempt
   worktree?: string | undefined;
   failures?: string[] | undefined;
 }
