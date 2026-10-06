@@ -387,6 +387,12 @@ describe("anchoredInDiff", () => {
   it("fails closed when the output is not JSON (safe without outputMatches)", async () => {
     const res = await gate.check(gctx(".", { output: "looks fine to me" }));
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reasons[0]).toContain("not valid JSON");
+    if (!res.ok) expect(res.reasons[0]).toContain("not a JSON object");
+  });
+
+  it("fails closed on the JSON literal null without throwing", async () => {
+    const res = await gate.check(gctx(".", { output: "null" }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("not a JSON object");
   });
 });

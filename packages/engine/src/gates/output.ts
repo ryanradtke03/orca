@@ -45,10 +45,10 @@ interface AnchoredComment {
  * on the line just above or below a change still counts.
  *
  * Blocks comments about code the change didn't touch and invented line numbers —
- * the two ways a review looks grounded without being grounded. It fails closed on
- * output that isn't JSON (so it's safe on its own, not only when `outputMatches`
- * runs first), and treats a comment with no usable file/line as unanchored rather
- * than trusted.
+ * the two ways a review looks grounded without being grounded. It fails closed
+ * unless the output is a JSON object (so it's safe on its own, not only when
+ * `outputMatches` runs first), and treats a comment with no usable file/line as
+ * unanchored rather than trusted.
  */
 export function anchoredInDiff(
   hunks: (task: Task) => Record<string, [number, number][]>,
@@ -59,14 +59,16 @@ export function anchoredInDiff(
     name: "anchoredInDiff",
     async check(ctx) {
       const parsed = extractJson(ctx.output);
-      // Fail closed: a non-JSON reply can't be anchored to anything. In pr-review
-      // outputMatches already rejects it first, but failing here keeps the gate
-      // correct if it's reused alone or the gate order ever changes.
-      if (parsed === undefined) {
-        return { ok: false, reasons: ["the final message was not valid JSON"] };
+      // Fail closed unless the output is a JSON object. extractJson returns
+      // undefined for non-JSON and null for the literal `null`; both, and bare
+      // primitives, can't carry comments and would otherwise throw on `.comments`.
+      // In pr-review outputMatches rejects these first, but failing here keeps the
+      // gate correct if it's reused alone or the gate order ever changes.
+      if (parsed === null || typeof parsed !== "object") {
+        return { ok: false, reasons: ["the final message was not a JSON object"] };
       }
       const comments = (parsed as { comments?: unknown }).comments;
-      if (!Array.isArray(comments)) return { ok: true }; // valid JSON, no comments to anchor
+      if (!Array.isArray(comments)) return { ok: true }; // object with no comments to anchor
 
       const ranges = hunks(ctx.task);
       const reasons: string[] = [];
