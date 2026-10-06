@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { exec } from "../src/exec.js";
 import {
+  anchoredInDiff,
   commandFails,
   commandPasses,
   countNotLess,
@@ -10,6 +12,7 @@ import {
   noFileChanges,
   noPattern,
   onlyTouches,
+  outputMatches,
   type ParsedFailure,
 } from "../src/gates/index.js";
 import type { GateContext, Task } from "../src/types.js";
@@ -28,6 +31,7 @@ function gctx(worktree: string, over: Partial<GateContext> = {}): GateContext {
     task: over.task ?? task(),
     diff: over.diff ?? "",
     changedFiles: over.changedFiles ?? [],
+    output: over.output ?? "",
     exec: (cmd, opts) => exec(worktree, cmd, opts),
   };
 }
@@ -297,5 +301,86 @@ describe("failsOnBase", () => {
     const res = await gate.check(gctx(repo, { changedFiles: ["test/pattern.txt"] }));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reasons[0]).toContain("old code");
+  });
+});
+
+describe("outputMatches", () => {
+  const Review = z
+    .object({
+      verdict: z.enum(["approve", "request_changes"]),
+      comments: z.array(z.object({ severity: z.enum(["blocking", "suggestion"]) })),
+    })
+    .refine(
+      (r) =>
+        (r.verdict === "request_changes") === r.comments.some((c) => c.severity === "blocking"),
+      "request_changes iff a blocking comment",
+    );
+
+  it("passes on well-formed JSON that matches the schema", async () => {
+    const output = JSON.stringify({ verdict: "approve", comments: [] });
+    const res = await outputMatches(Review).check(gctx(".", { output }));
+    expect(res.ok).toBe(true);
+  });
+
+  it("reads JSON out of a code fence with chatter around it", async () => {
+    const output = 'Here is my review:\n```json\n{ "verdict": "approve", "comments": [] }\n```';
+    const res = await outputMatches(Review).check(gctx(".", { output }));
+    expect(res.ok).toBe(true);
+  });
+
+  it("fails when the final message is not JSON", async () => {
+    const res = await outputMatches(Review).check(gctx(".", { output: "looks good to me!" }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("not valid JSON");
+  });
+
+  it("fails with the field path when the schema does not match", async () => {
+    const output = JSON.stringify({ verdict: "maybe", comments: [] });
+    const res = await outputMatches(Review).check(gctx(".", { output }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons.join(" ")).toContain("verdict");
+  });
+
+  it("enforces a schema refinement (approve with a blocker is rejected)", async () => {
+    const output = JSON.stringify({ verdict: "approve", comments: [{ severity: "blocking" }] });
+    const res = await outputMatches(Review).check(gctx(".", { output }));
+    expect(res.ok).toBe(false);
+  });
+});
+
+describe("anchoredInDiff", () => {
+  const hunks = () => ({ "src/stats.ts": [[10, 14] as [number, number]] });
+  const gate = anchoredInDiff(() => hunks());
+  const withComments = (comments: unknown[]) => JSON.stringify({ verdict: "approve", comments });
+
+  it("passes when every comment is inside a changed hunk", async () => {
+    const output = withComments([{ file: "src/stats.ts", line: 12 }]);
+    const res = await gate.check(gctx(".", { output }));
+    expect(res.ok).toBe(true);
+  });
+
+  it("allows a comment a couple of lines outside the hunk (slack)", async () => {
+    const output = withComments([{ file: "src/stats.ts", line: 16 }]);
+    const res = await gate.check(gctx(".", { output }));
+    expect(res.ok).toBe(true);
+  });
+
+  it("fails on a comment well outside any hunk", async () => {
+    const output = withComments([{ file: "src/stats.ts", line: 99 }]);
+    const res = await gate.check(gctx(".", { output }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("not inside a changed hunk");
+  });
+
+  it("fails on a comment about a file the diff didn't change", async () => {
+    const output = withComments([{ file: "src/other.ts", line: 3 }]);
+    const res = await gate.check(gctx(".", { output }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("didn't change");
+  });
+
+  it("passes when there are no comments to anchor", async () => {
+    const res = await gate.check(gctx(".", { output: withComments([]) }));
+    expect(res.ok).toBe(true);
   });
 });

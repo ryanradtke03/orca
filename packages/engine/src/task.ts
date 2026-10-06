@@ -17,14 +17,23 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
   let feedback: string[] = [];
   let costUsd = 0;
   let lastWorktree = "";
+  let lastOutput = "";
 
+  let attemptsRun = 0;
   for (let attempt = 1; attempt <= ctx.limits.maxAttempts; attempt++) {
     // Stop retrying if the run was cancelled or ran out of budget mid-task.
     if (ctx.signal.aborted || ctx.budget.exceeded()) break;
 
+    attemptsRun = attempt;
+
     const worktree = await createWorktree(ctx.repo, ctx.runId, task.id, attempt, ctx.worktreeDir);
     lastWorktree = worktree.path;
-    ctx.emit({ type: "task.started", taskId: task.id, attempt, worktree: worktree.path });
+    ctx.emit({
+      type: "task.started",
+      taskId: task.id,
+      attempt,
+      worktree: worktree.path,
+    });
 
     const cfg = recipe.worker(task, ctx);
     const run = ctx.messenger.send({
@@ -42,6 +51,7 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
     const done = await run.done;
     costUsd += done.costUsd ?? 0;
     ctx.budget.add(done.costUsd ?? 0);
+    lastOutput = done.text ?? "";
 
     const diff = await getDiff(worktree.path);
 
@@ -53,6 +63,7 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
         task,
         diff: diff.patch,
         changedFiles: diff.files,
+        output: lastOutput,
         exec: (cmd, opts) => exec(worktree.path, cmd, opts),
       };
       reasons = await runGates(recipe.gates, gctx, ctx, task.id);
@@ -61,22 +72,29 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
     }
 
     if (reasons.length === 0) {
-      ctx.emit({ type: "task.done", taskId: task.id, attempts: attempt, costUsd });
+      ctx.emit({
+        type: "task.done",
+        taskId: task.id,
+        attempts: attempt,
+        costUsd,
+      });
       return {
         task,
         ok: true,
         attempts: attempt,
         costUsd,
         diff: diff.patch,
+        output: lastOutput,
         worktree: worktree.path,
       };
     }
 
     feedback = reasons;
-    if (attempt < ctx.limits.maxAttempts) {
-      ctx.emit({ type: "task.retrying", taskId: task.id, attempt, reasons });
-      await removeWorktree(ctx.repo, worktree.path); // discard failed attempts; keep the last one
-    }
+    const willRetry =
+      attempt < ctx.limits.maxAttempts && !ctx.signal.aborted && !ctx.budget.exceeded();
+    if (!willRetry) break;
+    ctx.emit({ type: "task.retrying", taskId: task.id, attempt, reasons });
+    await removeWorktree(ctx.repo, worktree.path);
   }
 
   await recipe.onFailed?.(task, feedback, ctx);
@@ -84,8 +102,9 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
   return {
     task,
     ok: false,
-    attempts: ctx.limits.maxAttempts,
+    attempts: attemptsRun,
     costUsd,
+    output: lastOutput,
     failures: feedback,
     worktree: lastWorktree,
   };

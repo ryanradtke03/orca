@@ -3,6 +3,7 @@ export { createEngine } from "./engine.js";
 export type { ExecResult } from "./exec.js";
 export { exec } from "./exec.js";
 export {
+  anchoredInDiff,
   commandFails,
   commandPasses,
   countNotLess,
@@ -12,6 +13,7 @@ export {
   noFileChanges,
   noPattern,
   onlyTouches,
+  outputMatches,
   type ParsedFailure,
   runGates,
 } from "./gates/index.js";
