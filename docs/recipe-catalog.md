@@ -1319,7 +1319,7 @@ Issue or report → [`repro-bug`](#repro-bug) (test must fail) → Commit test t
 
 | Piece                                                                    | Status | Spec                                                                              |
 |--------------------------------------------------------------------------|--------|-----------------------------------------------------------------------------------|
-| `repro-bug`                                                              | next   | [repro-bug →](#repro-bug)                                                         |
+| `repro-bug`                                                              | built  | [repro-bug →](#repro-bug)                                                         |
 | `fix-ci`                                                                 | built  | [fix-ci →](#fix-ci) No changes to the recipe; it runs at a different base (below) |
 | `pr-review`                                                              | built  | [pr-review →](#pr-review)                                                         |
 | Engine: base refs, git helpers, child runs, chains, task output, PR sink | next   | [Composition (engine) →](#composition)                                            |
@@ -1636,7 +1636,7 @@ Turn a bug report into one test that fails on the current code, for the reason t
 
 ## Header
 
-- **Status:** next Spec written, not built
+- **Status:** built Verified on 5 scenarios with real Claude runs
 - **Category:** Testing
 - **Phase:** 2 · Tests that test (first used in Phase 5's Bug to PR)
 - **Effort:** 1–2 days: the recipe, two new gates, 5 scenarios
