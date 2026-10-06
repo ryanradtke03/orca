@@ -45,9 +45,10 @@ interface AnchoredComment {
  * on the line just above or below a change still counts.
  *
  * Blocks comments about code the change didn't touch and invented line numbers —
- * the two ways a review looks grounded without being grounded. Runs after
- * `outputMatches`, so by here the output is known to parse; a comment with no
- * usable file/line is treated as unanchored rather than trusted.
+ * the two ways a review looks grounded without being grounded. It fails closed on
+ * output that isn't JSON (so it's safe on its own, not only when `outputMatches`
+ * runs first), and treats a comment with no usable file/line as unanchored rather
+ * than trusted.
  */
 export function anchoredInDiff(
   hunks: (task: Task) => Record<string, [number, number][]>,
@@ -58,8 +59,14 @@ export function anchoredInDiff(
     name: "anchoredInDiff",
     async check(ctx) {
       const parsed = extractJson(ctx.output);
-      const comments = (parsed as { comments?: unknown })?.comments;
-      if (!Array.isArray(comments)) return { ok: true }; // no comments to anchor
+      // Fail closed: a non-JSON reply can't be anchored to anything. In pr-review
+      // outputMatches already rejects it first, but failing here keeps the gate
+      // correct if it's reused alone or the gate order ever changes.
+      if (parsed === undefined) {
+        return { ok: false, reasons: ["the final message was not valid JSON"] };
+      }
+      const comments = (parsed as { comments?: unknown }).comments;
+      if (!Array.isArray(comments)) return { ok: true }; // valid JSON, no comments to anchor
 
       const ranges = hunks(ctx.task);
       const reasons: string[] = [];
