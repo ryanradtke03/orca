@@ -10,7 +10,7 @@ import { parseHunks, trim } from "../shared/diff.js";
 // to point at.
 const ReviewObject = z.object({
   verdict: z.enum(["approve", "request_changes"]),
-  summary: z.string().max(600),
+  summary: z.string().max(1000),
   comments: z
     .array(
       z.object({
@@ -100,6 +100,7 @@ export const prReview = defineRecipe({
         "Only comment when it genuinely helps the author. If the change is sound, approve with" +
           " an empty comments list — do not manufacture nitpicks, style notes, or hypothetical" +
           ' "if this were reused differently" concerns just to have something to say.',
+        "Keep the summary to a few sentences (under 1000 characters); put specifics in comments.",
         `Your final message must be ONLY JSON matching this schema, no prose or code fences:\n${JSON.stringify(
           z.toJSONSchema(ReviewObject),
         )}`,

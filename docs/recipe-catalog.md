@@ -1941,7 +1941,7 @@ worker: (task) => ({
 ```ts
 export const ReviewSchema = z.object({
   verdict: z.enum(["approve", "request_changes"]),
-  summary: z.string().max(600),
+  summary: z.string().max(1000),
   comments: z.array(z.object({
     file: z.string(),
     line: z.number().int(),
