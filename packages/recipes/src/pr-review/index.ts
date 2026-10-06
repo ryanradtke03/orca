@@ -97,6 +97,9 @@ export const prReview = defineRecipe({
         'Comment only on lines the diff adds or changes. Mark a comment "blocking" only if' +
           ' the change is wrong or incomplete; otherwise "suggestion". Request changes exactly' +
           " when you leave a blocking comment.",
+        "Only comment when it genuinely helps the author. If the change is sound, approve with" +
+          " an empty comments list — do not manufacture nitpicks, style notes, or hypothetical" +
+          ' "if this were reused differently" concerns just to have something to say.',
         `Your final message must be ONLY JSON matching this schema, no prose or code fences:\n${JSON.stringify(
           z.toJSONSchema(ReviewObject),
         )}`,
