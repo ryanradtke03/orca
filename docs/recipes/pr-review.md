@@ -6,13 +6,13 @@ Review a branch's changes and return a structured verdict with comments pinned t
 
 ## Header
 
-- **Status:** next Spec written, not built
+- **Status:** built · Verified on 5 scenarios with real Claude runs (Oct 6, 2026)
 - **Category:** Read-only
 - **Phase:** 4 · Read-only workers
-- **Effort:** 2 days: schema, two new gates, seeded-diff scenarios
-- **Engine uses:** Base refs and task output from [Composition](#composition); `onlyTouches([])` to enforce read-only
+- **Effort:** ~1 day: schema, two new gates, task output in the engine, seeded-diff scenarios
+- **Engine uses:** worker task output (`GateContext.output`); `onlyTouches([])` to enforce read-only
 - **Gates used:** `onlyTouches` (exists)
-- **New engine work:** Gates `outputMatches` and `anchoredInDiff`
+- **New engine work:** worker task output (`GateContext.output`, `TaskResult.output`); gates `outputMatches` and `anchoredInDiff`. Base refs (worktree pinned at `head`) deferred to [Composition](#composition): `plan` diffs the refs with `ctx.exec`, and `onlyTouches([])` keeps the run read-only whatever the worktree sits at.
 
 ## When to use it
 
@@ -168,17 +168,19 @@ finish(results)     ──▶    the parsed review
 
 ## Scenarios
 
-Each scenario is a branch with a seeded change and a known right answer. This is how reviewer accuracy gets measured.
+Each scenario is a branch with a seeded change and a known right answer. This is how reviewer accuracy gets measured. The harness commits each patch as one commit on top of main and reviews it with `base: HEAD~1, head: HEAD`; the checks read the verdict and comments from `RunResult.output`. Real results from Claude runs on Oct 6, 2026.
 
-| Scenario        | Diff on the branch                                                                         | Expected        | Hard checks                                           |
-|-----------------|--------------------------------------------------------------------------------------------|-----------------|-------------------------------------------------------|
-| `p-good`        | A correct median fix                                                                       | approve         | verdict approve; no blocking comments                 |
-| `p-overfit`     | "Fix" that special-cases the test input: `if (xs.length === 4) return 2.5`                 | request_changes | A blocking comment within 2 lines of the special case |
-| `p-side-effect` | Fix plus an unrelated change that drops the input copy (`median` now mutates its argument) | request_changes | Blocking comment on the `sort` line                   |
-| `p-wrong-fix`   | Report says cart total is a cent low; diff changes `formatCents` instead                   | request_changes | Blocking comment saying it doesn't address the issue  |
-| `p-noise`       | A pure rename                                                                              | approve         | No blocking comments (false-positive check)           |
+| Scenario        | Diff on the branch                                                                         | Expected        | Hard checks                                           | Real result           |
+|-----------------|--------------------------------------------------------------------------------------------|-----------------|-------------------------------------------------------|-----------------------|
+| `p-good`        | A correct, behavior-preserving `median` refactor                                           | approve         | verdict approve; no blocking comments                 | ✓ 1 try, \$0.245, 12s |
+| `p-overfit`     | "Fix" that special-cases the test input: `if (sorted.length === 4) return 2.5`             | request_changes | A blocking comment within 2 lines of the special case | ✓ 1 try, \$0.204, 32s |
+| `p-side-effect` | `[...xs].sort()` → `xs.sort()`, so `median` now mutates its argument                       | request_changes | Blocking comment on the `sort` line                   | ✓ 1 try, \$0.181, 22s |
+| `p-wrong-fix`   | Issue says `Cart.total` is a cent low; diff changes `formatCents` instead                  | request_changes | Blocking comment saying it doesn't address the issue  | ✓ 1 try, \$0.254, 42s |
+| `p-noise`       | A pure local rename (`mid` → `middle`)                                                     | approve         | No blocking comments (false-positive check)           | ✓ 1 try, \$0.113, 5s  |
 
 Track over runs: **catch rate** (seeded problems flagged as blocking) and **false alarms** (blocking comments on p-good and p-noise). Those two numbers are the reviewer's eval.
+
+Across the five (one run each): **catch rate 3/3**, **false alarms 0/2**, all hard and soft checks green, 1.0 attempts each, ~\$1.00 total (~\$0.20 each). The spec asks for three runs per scenario before trusting the number — this is the first run; re-run to confirm stability.
 
 ## Files
 
@@ -191,10 +193,10 @@ Track over runs: **catch rate** (seeded problems flagged as blocking) and **fals
 
 ## Build checklist
 
-- [ ] Base refs and task output in the engine
-- [ ] `parseHunks`, `outputMatches`, `anchoredInDiff`, unit-tested
-- [ ] Five `p-*` branches; `scenarios.ts` supports branch scenarios and reviewer checks
-- [ ] The recipe; record catch rate and false alarms over 3 runs each
+- [x] Task output in the engine (`GateContext.output`, `TaskResult.output`). Base refs (worktree at `head`) deferred to Composition
+- [x] `parseHunks`, `outputMatches`, `anchoredInDiff`, unit-tested
+- [x] Five `p-*` branches; `scenarios.ts` reads the review from `RunResult.output` (a read-only task has no diff, so the diff/verify loop skips cleanly)
+- [x] The recipe; one run each recorded (catch rate 3/3, 0 false alarms). Re-run for the 3-run average
 
 ## Open questions
 
