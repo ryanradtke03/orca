@@ -11,6 +11,7 @@ import type {
   MessengerRun,
 } from "@orchestra/messenger";
 import { createBudget } from "../src/budget.js";
+import { exec as runCommand } from "../src/exec.js";
 import type { EngineEvent, EngineLimits, EngineRun, RunCtx } from "../src/types.js";
 
 const exec = promisify(execFile);
@@ -109,6 +110,11 @@ export function makeRunCtx(opts: {
     messenger: opts.messenger,
     signal: opts.signal ?? new AbortController().signal,
     emit,
+    exec: (cmd, execOpts) =>
+      runCommand(opts.repo, cmd, execOpts).then((r) => ({
+        code: r.code,
+        output: `${r.stdout}${r.stderr}`,
+      })),
     runId: "run-test",
     limits,
     budget: createBudget(limits, emit),

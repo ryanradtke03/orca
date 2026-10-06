@@ -27,3 +27,25 @@ export function commandPasses(
     },
   };
 }
+
+/**
+ * The inverse of `commandPasses`: the command must exit non-zero in the worktree.
+ * repro-bug uses it to require that the new test *fails* on the current code — a
+ * test that passes wouldn't show the reported bug.
+ *
+ * `command` may be a string or a function of the task, the same as `commandPasses`.
+ */
+export function commandFails(command: string | ((task: Task) => string)): Gate {
+  return {
+    name: "commandFails",
+    async check(ctx) {
+      const cmd = typeof command === "function" ? command(ctx.task) : command;
+      const { code } = await ctx.exec(cmd);
+      if (code !== 0) return { ok: true };
+      return {
+        ok: false,
+        reasons: [`\`${cmd}\` passed; the test doesn't reproduce the bug`],
+      };
+    },
+  };
+}

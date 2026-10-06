@@ -1,4 +1,4 @@
-import type { Gate } from "../types.js";
+import type { Gate, Task } from "../types.js";
 
 // Minimal glob → RegExp: `*` matches within a path segment, `**` matches across
 // segments, `?` matches one non-slash char. Enough for allow-lists like
@@ -29,17 +29,48 @@ function globToRegExp(glob: string): RegExp {
 /**
  * Reject the attempt if it changed any file outside the allowed globs.
  * Enforces a recipe's `allowEdits` after the fact, from the diff.
+ *
+ * `globs` may be a fixed list, or a function of the task — so a recipe can scope
+ * edits to files it discovered in plan() (e.g. the files that had lint errors),
+ * the same way `commandPasses` reads its command from the task.
  */
-export function onlyTouches(globs: string[]): Gate {
-  const matchers = globs.map(globToRegExp);
+export function onlyTouches(globs: string[] | ((task: Task) => string[])): Gate {
   return {
     name: "onlyTouches",
     async check(ctx) {
+      const allowed = typeof globs === "function" ? globs(ctx.task) : globs;
+      const matchers = allowed.map(globToRegExp);
       const offending = ctx.changedFiles.filter((file) => !matchers.some((m) => m.test(file)));
       if (offending.length === 0) return { ok: true };
       return {
         ok: false,
         reasons: offending.map((f) => `changed a file outside the allowed paths: ${f}`),
+      };
+    },
+  };
+}
+
+// Copy a pattern without the global flag so repeated .test() calls aren't stateful.
+function stateless(pattern: RegExp): RegExp {
+  return pattern.global ? new RegExp(pattern.source, pattern.flags.replace("g", "")) : pattern;
+}
+
+/**
+ * Reject the attempt if it changed any file whose path matches one of the
+ * patterns — a deny-list on file names (matched against the changed paths, not
+ * their contents). The complement of onlyTouches: use it to protect tests,
+ * config, lockfiles, etc. from being edited to force a command green.
+ */
+export function noFileChanges(patterns: RegExp[]): Gate {
+  const matchers = patterns.map(stateless);
+  return {
+    name: "noFileChanges",
+    async check(ctx) {
+      const offending = ctx.changedFiles.filter((file) => matchers.some((m) => m.test(file)));
+      if (offending.length === 0) return { ok: true };
+      return {
+        ok: false,
+        reasons: offending.map((f) => `changed a protected file: ${f}`),
       };
     },
   };

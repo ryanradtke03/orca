@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createBudget } from "./budget.js";
+import { exec } from "./exec.js";
 import { runRecipe } from "./lifecycle.js";
 import { createEngineRun } from "./run.js";
 import { createTracer, readRuns } from "./trace.js";
@@ -62,6 +63,11 @@ export function createEngine(config: EngineConfig): Engine {
           messenger: config.messenger,
           signal,
           emit: tracedEmit,
+          exec: (cmd, opts) =>
+            exec(config.repo, cmd, opts).then((r) => ({
+              code: r.code,
+              output: `${r.stdout}${r.stderr}`,
+            })),
           runId: id,
           limits,
           budget: createBudget(limits, tracedEmit),

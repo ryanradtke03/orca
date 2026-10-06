@@ -69,6 +69,14 @@ export interface Ctx {
   messenger: Messenger; // recipes use askJson here for planner / triage agents
   signal: AbortSignal;
   emit(event: EngineEvent): void;
+  /**
+   * Run a command in the repo root (combined stdout+stderr), e.g. so plan() can
+   * check whether there's anything to do. Gates get a richer exec on GateContext.
+   */
+  exec(
+    cmd: string,
+    opts?: { timeoutMs?: number | undefined },
+  ): Promise<{ code: number; output: string }>;
 }
 
 export interface Recipe<Input, Output = unknown> {

@@ -67,6 +67,31 @@ describe("engine — validation & status", () => {
     expect(result.output).toEqual({ ok: true });
   });
 
+  it("treats an empty plan as a completed no-op and gives plan() a working ctx.exec", async () => {
+    const messenger = writesFile();
+    // plan runs `exit 0` in the repo (code 0) and returns no tasks.
+    const noop = defineRecipe({
+      name: "noop",
+      description: "",
+      input: z.object({}),
+      async plan(_input, ctx) {
+        const { code } = await ctx.exec("exit 0");
+        return code === 0 ? [] : [{ id: "t", goal: "t", dependsOn: [], context: {} }];
+      },
+      worker: () => ({ prompt: "p", tools: ["Edit"], maxTurns: 1 }),
+      gates: [],
+      async finish(results) {
+        return { fixed: results.every((r) => r.ok) };
+      },
+    });
+    const engine = createEngine({ repo, messenger, recipes: { noop } });
+    const { result } = await runToEnd(engine.start("noop", {}));
+    expect(result.status).toBe("completed");
+    expect(result.tasks).toHaveLength(0);
+    expect(result.output).toEqual({ fixed: true });
+    expect(messenger.calls).toHaveLength(0); // no worker ran
+  });
+
   it("surfaces a finish() failure as finish_failed", async () => {
     const badFinish = defineRecipe({
       name: "bad",

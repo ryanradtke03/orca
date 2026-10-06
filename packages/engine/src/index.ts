@@ -3,10 +3,16 @@ export { createEngine } from "./engine.js";
 export type { ExecResult } from "./exec.js";
 export { exec } from "./exec.js";
 export {
+  commandFails,
   commandPasses,
+  countNotLess,
+  failsOnBase,
+  failsWithAssertion,
   filesExist,
+  noFileChanges,
   noPattern,
   onlyTouches,
+  type ParsedFailure,
   runGates,
 } from "./gates/index.js";
 export { defineRecipe } from "./recipe.js";
