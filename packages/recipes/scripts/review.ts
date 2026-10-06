@@ -23,6 +23,10 @@ const engine = createEngine({
   repo,
   messenger: createMessenger({ backend: "cli" }),
   recipes: { "pr-review": prReview },
+  // A review never edits, so there's nothing to inspect in a worktree afterward.
+  // Drop them so an ad-hoc review doesn't leave dirs under the repo (which also
+  // trips up vitest's file globbing).
+  keepWorktrees: "never",
 });
 
 const run = engine.start("pr-review", { base, head, ...(issue ? { issue } : {}) });
