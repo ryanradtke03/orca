@@ -15,7 +15,8 @@ export type KeepWorktrees = "always" | "on-failure" | "never";
 export interface EngineConfig {
   repo: string; // git repo the engine works on
   messenger: Messenger; // any Messenger (CLI, fake, later SDK)
-  recipes: Record<string, AnyRecipe>; // name → recipe registry
+  recipes: Record<string, Registered>; // name → recipe or chain registry
+  pr?: PrSink | undefined; // read issues / open PRs / comment (chains); omit outside chains
   limits?: Partial<EngineLimits> | undefined;
   worktreeDir?: string | undefined; // where task worktrees go (gitignored)
   traceDir?: string | undefined; // events + messenger traces per run
@@ -26,6 +27,7 @@ export interface StartOptions {
   signal?: AbortSignal | undefined;
   approvePlan?: boolean | undefined;
   limits?: Partial<EngineLimits> | undefined;
+  base?: string | undefined; // a branch or commit to run against; default "HEAD"
 }
 
 // ── The recipe contract ───────────────────────────────────────
@@ -94,6 +96,66 @@ export interface Recipe<Input, Output = unknown> {
 
 // biome-ignore lint/suspicious/noExplicitAny: the registry holds recipes with differing input types
 export type AnyRecipe = Recipe<any, any>;
+
+// ── Composition: child runs, git, PR sink, chains ─────────────
+export interface ChildRunOptions {
+  base?: string | undefined; // the ref to run the child against; default "HEAD"
+  limits?: Partial<EngineLimits> | undefined; // tighten the child's limits (capped by the parent)
+}
+
+/** Start another run from inside a chain. Never throws; a failed child is a RunResult. */
+export type ChildRun = (name: string, input: unknown, opts?: ChildRunOptions) => Promise<RunResult>;
+
+export interface GitCommitOptions {
+  from?: string | undefined; // the ref a new branch is cut from; default "HEAD"
+  diff: string; // a unified diff, applied with `git apply --index`
+  message: string;
+}
+
+/** Commit diffs onto a branch through a throwaway worktree — your checkout never moves. */
+export interface GitHelpers {
+  commit(branch: string, opts: GitCommitOptions): Promise<string>; // returns the new commit sha
+  push(branch: string): Promise<void>; // only orca/* branches
+}
+
+export interface PrOpenInput {
+  branch: string;
+  base: string;
+  title: string;
+  body: string;
+  draft: boolean;
+}
+
+/** Read issues, open PRs and comment. A local file-backed version runs scenarios. */
+export interface PrSink {
+  readIssue(n: number): Promise<string>; // "title\n\nbody"
+  open(pr: PrOpenInput): Promise<{ url: string }>;
+  comment(issue: number, body: string): Promise<void>;
+}
+
+/** A chain sequences child runs and deterministic steps; no plan/worker/gates. */
+export interface Chain<Input, Output = unknown> {
+  kind: "chain";
+  name: string;
+  description: string;
+  input: z.ZodType<Input>;
+  run(input: Input, ctx: ChainCtx): Promise<Output>;
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: the registry holds chains with differing input types
+export type AnyChain = Chain<any, any>;
+
+/** What the registry holds: a recipe or a chain, told apart by `kind`. */
+export type Registered = AnyRecipe | AnyChain;
+
+/** The context a chain's run() receives: the base Ctx plus composition tools. */
+export interface ChainCtx extends Ctx {
+  runId: string;
+  run: ChildRun; // start a child run
+  git: GitHelpers; // commit diffs onto a branch
+  pr: PrSink; // read issues, open PRs, comment
+  step<T>(name: string, fn: () => Promise<T>): Promise<T>; // emits step.started / step.done
+}
 
 // ── Results ───────────────────────────────────────────────────
 /** The full result of a single task, handed to recipe.finish(). */
@@ -175,6 +237,11 @@ export type EngineEvent =
   | { type: "task.failed"; taskId: string; reasons: string[] }
   | { type: "task.skipped"; taskId: string; reason: string }
   | { type: "budget.warning"; resource: "cost" | "duration"; used: number; limit: number }
+  | { type: "child.started"; childRunId: string; recipe: string }
+  | { type: "child.event"; childRunId: string; recipe: string; event: EngineEvent }
+  | { type: "child.done"; childRunId: string; recipe: string; result: RunResult }
+  | { type: "step.started"; name: string }
+  | { type: "step.done"; name: string }
   | { type: "run.done"; result: RunResult };
 
 // Tracks a run's cost and duration against the limits (design §12, budget.ts).
@@ -209,6 +276,13 @@ export interface RunCtx extends Ctx {
   budget: Budget;
   keepWorktrees: KeepWorktrees;
   worktreeDir?: string | undefined;
+  base: string; // the ref this run works at; "HEAD" for an ordinary run
+  depth: number; // child-run nesting depth; a top-level run is 0
   approvePlan: boolean;
   waitApproval(): Promise<boolean>;
+  // Composition tools, also exposed to chains through ChainCtx.
+  run: ChildRun;
+  git: GitHelpers;
+  pr: PrSink;
+  step<T>(name: string, fn: () => Promise<T>): Promise<T>;
 }
