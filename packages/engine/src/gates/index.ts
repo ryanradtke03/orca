@@ -3,7 +3,14 @@ export { failsOnBase } from "./base.js";
 export { commandFails, commandPasses } from "./command.js";
 export { countNotLess } from "./count.js";
 export { filesExist } from "./files.js";
-export { anchoredInDiff, outputMatches } from "./output.js";
+export {
+  anchoredInDiff,
+  claimsMatchEvidence,
+  closesIssue,
+  type Evidence,
+  mentionsOnlyDiffFiles,
+  outputMatches,
+} from "./output.js";
 export { noPattern } from "./patterns.js";
 export { runGates } from "./run.js";
 export { noFileChanges, onlyTouches } from "./scope.js";

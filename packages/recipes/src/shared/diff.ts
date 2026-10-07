@@ -8,6 +8,15 @@ export function trim(s: string, max: number): string {
 }
 
 /**
+ * The paths a unified diff touches, read from its `diff --git a/<path> b/<path>`
+ * headers. Unlike `parseHunks`, this keeps renamed and deleted files too, since
+ * pr-describe wants the full list of what changed, not only lines to comment on.
+ */
+export function changedFiles(diff: string): string[] {
+  return [...diff.matchAll(/^diff --git a\/(.+?) b\//gm)].map((m) => m[1] ?? "");
+}
+
+/**
  * Map each changed file to the new-side line ranges of its diff hunks, e.g.
  * `{ "src/stats.ts": [[10, 14], [40, 41]] }`. The range is the span the hunk
  * header reports on the new side (`@@ -a,b +c,d @@` → `[c, c + d - 1]`), so it
