@@ -26,7 +26,10 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
 
     attemptsRun = attempt;
 
-    const worktree = await createWorktree(ctx.repo, ctx.runId, task.id, attempt, ctx.worktreeDir);
+    const worktree = await createWorktree(ctx.repo, ctx.runId, task.id, attempt, {
+      base: ctx.base,
+      worktreeDir: ctx.worktreeDir,
+    });
     lastWorktree = worktree.path;
     ctx.emit({
       type: "task.started",

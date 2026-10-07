@@ -1,5 +1,7 @@
 // Git worktree plumbing. Each task attempt gets a fresh worktree on its own
-// branch, cut from the repo's current HEAD, so a worker never touches your checkout.
+// branch, cut from a base ref (the run's base, HEAD by default), so a worker
+// never touches your checkout. A run whose base isn't HEAD also gets one
+// read-only "base worktree", so plan()'s ctx.exec sees the branch.
 import { execFile } from "node:child_process";
 import { appendFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -23,21 +25,43 @@ export function worktreeRoot(repo: string, worktreeDir?: string): string {
   return worktreeDir ?? path.join(repo, ".orchestra", "worktrees");
 }
 
+export interface WorktreeOptions {
+  base?: string | undefined; // the ref to cut from; default HEAD
+  worktreeDir?: string | undefined;
+}
+
 /**
  * Create a fresh worktree for one task attempt:
- *   git worktree add -b orca/<run>/<task>-<n> <path> HEAD
+ *   git worktree add -b orca/<run>/<task>-<n> <path> <base>
  */
 export async function createWorktree(
   repo: string,
   runId: string,
   taskId: string,
   attempt: number,
-  worktreeDir?: string,
+  opts: WorktreeOptions = {},
 ): Promise<Worktree> {
   const branch = `orca/${runId}/${taskId}-${attempt}`;
-  const wt = path.join(worktreeRoot(repo, worktreeDir), runId, `${taskId}-${attempt}`);
-  await git(repo, ["worktree", "add", "-b", branch, wt, "HEAD"]);
+  const wt = path.join(worktreeRoot(repo, opts.worktreeDir), runId, `${taskId}-${attempt}`);
+  await git(repo, ["worktree", "add", "-b", branch, wt, opts.base ?? "HEAD"]);
   return { path: wt, branch };
+}
+
+/**
+ * A read-only worktree checked out (detached) at `base`, so a run's plan() and its
+ * ctx.exec see the branch instead of your checkout. It lives under the run's
+ * worktree dir, so `node_modules` resolves upward just like a task worktree does,
+ * and removeRunWorktrees cleans it up with the rest of the run.
+ */
+export async function createBaseWorktree(
+  repo: string,
+  runId: string,
+  base: string,
+  worktreeDir?: string,
+): Promise<string> {
+  const wt = path.join(worktreeRoot(repo, worktreeDir), runId, "__base__");
+  await git(repo, ["worktree", "add", "--detach", wt, base]);
+  return wt;
 }
 
 export interface Diff {

@@ -14,6 +14,7 @@
     "demo": "tsx scripts/run.ts",
     "review": "tsx scripts/review.ts",
     "describe": "tsx scripts/describe.ts",
+    "bug-to-pr": "tsx scripts/bug-to-pr.ts",
     "scenarios": "tsx scripts/scenarios.ts"
   },
   "dependencies": {

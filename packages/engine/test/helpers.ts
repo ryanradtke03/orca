@@ -119,7 +119,20 @@ export function makeRunCtx(opts: {
     limits,
     budget: createBudget(limits, emit),
     keepWorktrees: "never",
+    base: "HEAD",
+    depth: 0,
     approvePlan: false,
     waitApproval: () => Promise.resolve(true),
+    run: () => Promise.reject(new Error("child runs are not available in makeRunCtx")),
+    git: {
+      commit: () => Promise.reject(new Error("git helpers are not available in makeRunCtx")),
+      push: () => Promise.reject(new Error("git helpers are not available in makeRunCtx")),
+    },
+    pr: {
+      readIssue: () => Promise.reject(new Error("no PR sink in makeRunCtx")),
+      open: () => Promise.reject(new Error("no PR sink in makeRunCtx")),
+      comment: () => Promise.reject(new Error("no PR sink in makeRunCtx")),
+    },
+    step: async (_name, fn) => fn(),
   };
 }
