@@ -3,12 +3,16 @@ import { z } from "zod";
 import { exec } from "../src/exec.js";
 import {
   anchoredInDiff,
+  claimsMatchEvidence,
+  closesIssue,
   commandFails,
   commandPasses,
   countNotLess,
+  type Evidence,
   failsOnBase,
   failsWithAssertion,
   filesExist,
+  mentionsOnlyDiffFiles,
   noFileChanges,
   noPattern,
   onlyTouches,
@@ -392,6 +396,117 @@ describe("anchoredInDiff", () => {
 
   it("fails closed on the JSON literal null without throwing", async () => {
     const res = await gate.check(gctx(".", { output: "null" }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("not a JSON object");
+  });
+});
+
+describe("mentionsOnlyDiffFiles", () => {
+  const files = ["src/stats.ts", "src/cart.ts"];
+  const gate = mentionsOnlyDiffFiles(() => files);
+  const withChanges = (changes: unknown[]) => JSON.stringify({ changes });
+
+  it("passes when changes name exactly the files the diff touched", async () => {
+    const output = withChanges([
+      { file: "src/stats.ts", what: "fix median" },
+      { file: "src/cart.ts", what: "round total" },
+    ]);
+    expect((await gate.check(gctx(".", { output }))).ok).toBe(true);
+  });
+
+  it("fails on an invented file the diff didn't touch", async () => {
+    const output = withChanges([
+      { file: "src/stats.ts", what: "fix median" },
+      { file: "src/cart.ts", what: "round total" },
+      { file: "src/ghost.ts", what: "nothing real" },
+    ]);
+    const res = await gate.check(gctx(".", { output }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons.join(" ")).toContain("didn't touch");
+  });
+
+  it("fails when a changed file is left out of changes", async () => {
+    const output = withChanges([{ file: "src/stats.ts", what: "fix median" }]);
+    const res = await gate.check(gctx(".", { output }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons.join(" ")).toContain("src/cart.ts");
+  });
+
+  it("lets one directory entry cover a big mechanical change", async () => {
+    const many = mentionsOnlyDiffFiles(() => ["src/models/a.ts", "src/models/b.ts"]);
+    const output = withChanges([{ file: "src/models/", what: "renamed Foo to Bar" }]);
+    expect((await many.check(gctx(".", { output }))).ok).toBe(true);
+  });
+
+  it("accepts a bare basename for a file", async () => {
+    const one = mentionsOnlyDiffFiles(() => ["src/stats.ts"]);
+    const output = withChanges([{ file: "stats.ts", what: "fix median" }]);
+    expect((await one.check(gctx(".", { output }))).ok).toBe(true);
+  });
+
+  it("fails closed when the output is not a JSON object", async () => {
+    const res = await gate.check(gctx(".", { output: "looks good" }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("not a JSON object");
+  });
+});
+
+describe("closesIssue", () => {
+  const forIssue = (n: number | undefined) => closesIssue(() => n);
+
+  it("passes when closes matches the issue number", async () => {
+    const output = JSON.stringify({ closes: 42 });
+    expect((await forIssue(42).check(gctx(".", { output }))).ok).toBe(true);
+  });
+
+  it("fails when closes is missing or wrong", async () => {
+    const res = await forIssue(42).check(gctx(".", { output: JSON.stringify({ closes: 7 }) }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons[0]).toContain("#42");
+    const missing = await forIssue(42).check(gctx(".", { output: JSON.stringify({}) }));
+    expect(missing.ok).toBe(false);
+  });
+
+  it("passes when there is no issue to link", async () => {
+    expect((await forIssue(undefined).check(gctx(".", { output: "{}" }))).ok).toBe(true);
+  });
+});
+
+describe("claimsMatchEvidence", () => {
+  const evidence: Evidence[] = [
+    { recipe: "repro-bug", ok: true, gatesPassed: ["commandFails: pnpm vitest run"] },
+    { recipe: "fix-ci", ok: true, gatesPassed: ["commandPasses: pnpm check"] },
+  ];
+  const gate = claimsMatchEvidence(() => evidence);
+  const withTesting = (testing: unknown[]) => JSON.stringify({ testing });
+
+  it("passes when every claim cites a recipe or gate that ran", async () => {
+    const output = withTesting([
+      { claim: "the repro test fails on the bug", evidence: "repro-bug" },
+      { claim: "the suite passes", evidence: "commandPasses: pnpm check" },
+    ]);
+    expect((await gate.check(gctx(".", { output }))).ok).toBe(true);
+  });
+
+  it("fails on a claim that cites something not in the evidence", async () => {
+    const output = withTesting([{ claim: "verified locally", evidence: "my laptop" }]);
+    const res = await gate.check(gctx(".", { output }));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reasons.join(" ")).toContain("isn't in the run evidence");
+  });
+
+  it("requires testing to be empty when there is no evidence", async () => {
+    const none = claimsMatchEvidence(() => []);
+    const claimed = await none.check(
+      gctx(".", { output: withTesting([{ claim: "ran tests", evidence: "trust me" }]) }),
+    );
+    expect(claimed.ok).toBe(false);
+    if (!claimed.ok) expect(claimed.reasons[0]).toContain("must be empty");
+    expect((await none.check(gctx(".", { output: withTesting([]) }))).ok).toBe(true);
+  });
+
+  it("fails closed when the output is not a JSON object", async () => {
+    const res = await gate.check(gctx(".", { output: "all good" }));
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reasons[0]).toContain("not a JSON object");
   });

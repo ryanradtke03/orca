@@ -4,12 +4,16 @@ export type { ExecResult } from "./exec.js";
 export { exec } from "./exec.js";
 export {
   anchoredInDiff,
+  claimsMatchEvidence,
+  closesIssue,
   commandFails,
   commandPasses,
   countNotLess,
+  type Evidence,
   failsOnBase,
   failsWithAssertion,
   filesExist,
+  mentionsOnlyDiffFiles,
   noFileChanges,
   noPattern,
   onlyTouches,

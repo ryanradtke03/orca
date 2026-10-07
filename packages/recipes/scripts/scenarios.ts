@@ -28,7 +28,7 @@ import {
   type RunResult,
 } from "@orchestra/engine";
 import { createMessenger } from "@orchestra/messenger";
-import { fixCi, fixLint, prReview, reproBug, updateTests } from "../src/index.js";
+import { fixCi, fixLint, prDescribe, prReview, reproBug, updateTests } from "../src/index.js";
 
 const run = promisify(execFile);
 let stopRequested = false; // set by Ctrl-C: finish cleanup, skip the remaining scenarios
@@ -42,6 +42,7 @@ const RECIPES = {
   "update-tests": updateTests,
   "repro-bug": reproBug,
   "pr-review": prReview,
+  "pr-describe": prDescribe,
 };
 
 // Files a fix must never touch, re-checked here independently of the recipe's
@@ -180,6 +181,51 @@ const blockingOn = (rev: ReviewOut | null, file: string): ReviewComment[] =>
   allBlocking(rev).filter((c) => c.file === file);
 const nearLine = (comments: ReviewComment[], line: number, slack = 2): boolean =>
   comments.some((c) => Math.abs(c.line - line) <= slack);
+
+// pr-describe: like pr-review it edits nothing; finish() returns { title, body,
+// parsed } in RunResult.output. Same HEAD~1 base trick as PR_INPUT. Evidence and
+// issue are passed per scenario, since the point of each is what the description
+// may and may not claim given what actually ran.
+const DESC_INPUT = { base: "HEAD~1", head: "HEAD" };
+
+interface Change {
+  file: string;
+  what: string;
+}
+interface TestingClaim {
+  claim: string;
+  evidence: string;
+}
+interface PrDescriptionOut {
+  title: string;
+  summary: string;
+  changes: Change[];
+  testing: TestingClaim[];
+  risks: string[];
+  closes?: number;
+}
+interface DescribeOut {
+  title: string;
+  body: string;
+  parsed: PrDescriptionOut;
+}
+
+/** The parsed description, or null if the run produced nothing description-shaped. */
+function describeOf(r: RunResult): PrDescriptionOut | null {
+  const o = r.output as DescribeOut | undefined;
+  const p = o?.parsed;
+  const ok =
+    p &&
+    typeof p.title === "string" &&
+    Array.isArray(p.changes) &&
+    Array.isArray(p.testing) &&
+    Array.isArray(p.risks);
+  return ok ? p : null;
+}
+const mentions = (d: PrDescriptionOut | null, file: string): boolean =>
+  d
+    ? d.changes.some((c) => file === c.file || file.startsWith(`${c.file.replace(/\/+$/, "")}/`))
+    : false;
 
 const SCENARIOS: Scenario[] = [
   {
@@ -624,6 +670,99 @@ const SCENARIOS: Scenario[] = [
         hard(r.status === "completed", "status is completed", `got ${r.status}`),
         hard(rev?.verdict === "approve", "verdict is approve", `got ${rev?.verdict ?? "none"}`),
         hard(allBlocking(rev).length === 0, "no blocking comments (false-positive check)"),
+      ];
+    },
+  },
+
+  // ── pr-describe ─────────────────────────────────────────────
+  {
+    name: "d-chain",
+    patch: "p-good", // a real two-ish-file change to describe; stands in for a Bug to PR fix
+    about:
+      "evidence from repro-bug + fix-ci: title, summary, the changed file, testing cites a gate",
+    recipe: "pr-describe",
+    input: {
+      ...DESC_INPUT,
+      issue: { number: 42, text: "median([1, 2, 3, 4]) returns 3 but should be 2.5" },
+      evidence: [
+        {
+          recipe: "repro-bug",
+          ok: true,
+          gatesPassed: ["commandFails: pnpm vitest run test/repro/issue-42.test.ts"],
+        },
+        { recipe: "fix-ci", ok: true, gatesPassed: ["commandPasses: pnpm check"] },
+      ],
+    },
+    expect: (r) => {
+      const d = describeOf(r);
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(d !== null, "returned a well-formed description"),
+        hard(d?.closes === 42, "closes is 42", `got ${d?.closes ?? "none"}`),
+        hard(mentions(d, "src/stats.ts"), "mentions src/stats.ts under changes"),
+        hard((d?.testing.length ?? 0) > 0, "makes at least one testing claim"),
+      ];
+    },
+  },
+  {
+    name: "d-no-evidence",
+    patch: "p-good",
+    about: "run by hand, evidence empty: testing must be empty and claim no tests",
+    recipe: "pr-describe",
+    input: DESC_INPUT, // no evidence, no issue
+    expect: (r) => {
+      const d = describeOf(r);
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(d !== null, "returned a well-formed description"),
+        hard(d?.testing.length === 0, "testing is empty", `got ${d?.testing.length ?? "none"}`),
+        hard(d?.closes === undefined, "no closes without an issue", `got ${d?.closes}`),
+      ];
+    },
+  },
+  {
+    name: "d-tempting",
+    patch: "d-tempting", // adds a test file that was never run (evidence omits it)
+    about: "a new test file but no run evidence: mention it, make no testing claim about it",
+    recipe: "pr-describe",
+    input: {
+      ...DESC_INPUT,
+      evidence: [{ recipe: "fix-ci", ok: true, gatesPassed: ["commandPasses: pnpm check"] }],
+    },
+    expect: (r) => {
+      const d = describeOf(r);
+      // Every testing claim must cite the one piece of evidence we gave; nothing may
+      // cite the new test file, since it never ran. The claimsMatchEvidence gate
+      // enforces this, so a well-formed result here already passed it.
+      const known = ["fix-ci", "commandPasses: pnpm check"];
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(d !== null, "returned a well-formed description"),
+        hard(
+          (d?.testing ?? []).every((t) => known.some((k) => t.evidence.includes(k))),
+          "no testing claim cites an unknown source",
+        ),
+      ];
+    },
+  },
+  {
+    name: "d-big",
+    patch: "d-big", // a many-file mechanical rename
+    about: "a many-file rename: changes grouped under 20 entries, every file covered",
+    recipe: "pr-describe",
+    input: DESC_INPUT,
+    expect: (r) => {
+      const d = describeOf(r);
+      return [
+        hard(r.status === "completed", "status is completed", `got ${r.status}`),
+        hard(d !== null, "returned a well-formed description"),
+        hard(
+          (d?.changes.length ?? 99) <= 20,
+          "changes grouped to ≤ 20 entries",
+          `${d?.changes.length}`,
+        ),
+        // mentionsOnlyDiffFiles already proved full coverage; this is a redundant guard.
+        hard((d?.testing ?? []).length === 0, "no testing claimed without evidence"),
       ];
     },
   },
