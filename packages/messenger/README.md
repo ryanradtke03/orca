@@ -1,6 +1,6 @@
 # @orchestra/messenger
 
-The layer Orca uses to talk to Claude. It starts Claude Code, streams back what Claude is doing as typed events, and always finishes with exactly one result. Agents and the engine are built on top of it. They never talk to Claude directly.
+The messenger is how Orca talks to Claude. It starts Claude Code, streams what Claude does as typed events, and always finishes with exactly one result. The engine and recipes call Claude only through it.
 
 ```ts
 import { createMessenger, ask } from "@orchestra/messenger";
@@ -12,7 +12,7 @@ console.log(reply.text);
 
 - **One method.** A messenger has a single method, `send()`. Everything else is a helper built on top of it.
 - **Never throws.** `send()`, `ask()` and `conversation()` report failures as `ok: false` with an error kind. Only `askJson()` throws, because it promises a typed value.
-- **Runs on your subscription.** The CLI backend strips API keys from the environment by default, so runs are billed to your Claude Pro/Max plan, not the API.
+- **Runs on your subscription.** The CLI backend strips API keys from the environment by default, so runs count against your Claude Pro or Max plan instead of billing the API.
 - **Swappable backends.** Code written against `Messenger` works with the real CLI backend, the `FakeMessenger` used in tests, and future backends such as the Agent SDK.
 
 ---
@@ -37,7 +37,7 @@ console.log(reply.text);
 
 ### Requirements
 
-- Node 22+
+- Node 20 or later, per the root `package.json`
 - [Claude Code](https://code.claude.com) installed and on your `PATH` (`claude --version`)
 - A Claude Pro or Max subscription, logged in to Claude Code
 
@@ -58,7 +58,7 @@ Orca runs Claude Code with its own config folder, so your personal `CLAUDE.md`, 
 CLAUDE_CONFIG_DIR=~/.claude-orca claude
 ```
 
-Log in with your **Claude subscription** (not the Console / API key option), run `/status` to confirm, then `/exit`. Then pass the folder to the messenger:
+Log in with your Claude subscription, not the Console or API key option. Run `/status` to confirm, then `/exit`. Then pass the folder to the messenger:
 
 ```ts
 createMessenger({ backend: "cli", configDir: join(homedir(), ".claude-orca") });
@@ -134,8 +134,8 @@ const run = m.send({
   maxTurns: 5,
 });
 for await (const e of run.events) {
-  if (e.type === "tool_use") console.log("🔧", e.name, e.input);
-  if (e.type === "message") console.log("💬", e.text);
+  if (e.type === "tool_use") console.log("tool:", e.name, e.input);
+  if (e.type === "message") console.log("text:", e.text);
 }
 const done = await run.done;
 console.log(done.ok, done.turns, done.costUsd);
@@ -159,7 +159,7 @@ Create one with `createMessenger(config)` and reuse it for the whole app. A mess
 
 ### Run
 
-`send()` returns a **run** immediately. The work has already started.
+`send()` returns a run immediately, with the work already started.
 
 ```ts
 interface MessengerRun {
@@ -182,11 +182,11 @@ const done = await run.done;
 
 Guarantees:
 
-- `done` **always resolves**: on success, failure, timeout, cancellation, a crash, or a missing `claude` binary.
-- `done` **never rejects**. Failures are `{ ok: false, error: { kind, message } }`.
-- `done` resolves **even if nobody reads `events`**. Unread events are buffered.
-- The `done` event appears on the `events` stream **exactly once, last**, then the stream ends.
-- `events` can be read **once**.
+- `done` always resolves, whether the run succeeds, fails, times out, is cancelled, crashes, or can't find the `claude` binary.
+- `done` never rejects. A failure is `{ ok: false, error: { kind, message } }`.
+- `done` resolves even if nobody reads `events`. The run buffers unread events.
+- The `done` event appears on the `events` stream exactly once, as the last item, and then the stream ends.
+- You can read `events` only once.
 
 ### Events
 
@@ -265,9 +265,9 @@ send(req: MessengerRequest): MessengerRun;
 | `timeoutMs` |                           | `defaultTimeoutMs`             | kill the run after this long (error kind `timeout`)                                                       |
 | `signal`    |                           |                                | an `AbortSignal` to cancel the run (error kind `aborted`)                                                 |
 
-**With tools**, edits are accepted automatically (`--permission-mode acceptEdits`), because nobody is there to approve them. Only give a run the tools it needs, and point `cwd` at a folder it's allowed to change, such as a git worktree.
+When a run has tools, the backend passes `--permission-mode acceptEdits`, so Claude's edits go through without approval. Nobody is there to approve them. Give a run only the tools it needs, and point `cwd` at a folder it may change, such as a git worktree.
 
-**Talk-only** runs (`tools` empty, no `cwd`) run in the OS temp folder, so a `CLAUDE.md` in whatever folder you launched from can't influence them.
+A talk-only run, with empty `tools` and no `cwd`, runs in the OS temp folder. A `CLAUDE.md` in the folder you launched from can't influence it.
 
 ```ts
 const controller = new AbortController();
@@ -420,7 +420,7 @@ interface ClaudeHealth {
 }
 ```
 
-`ping: false` only runs `claude --version`: instant, no usage, but it can't confirm login. The default sends one tiny Haiku prompt.
+With `ping: false`, it only runs `claude --version`. That is instant and uses nothing, but it can't confirm you're logged in. By default it also sends one short prompt to Haiku.
 
 ```ts
 const health = await checkClaude({ ping: false });
@@ -443,7 +443,7 @@ interface FakeMessengerOptions {
 type Fixture = string /* path to a .jsonl file */ | unknown[] /* the lines as objects */;
 ```
 
-- Fixtures are used **in order**, one per `send()`. Running out gives `ok: false, kind: "no_result"`.
+- `FakeMessenger` uses fixtures in order, one per `send()`. When it runs out, the run ends with `ok: false` and `kind: "no_result"`.
 - `.calls` holds every request received, for assertions.
 
 ```ts
@@ -515,7 +515,7 @@ if (!done.ok) {
 }
 ```
 
-**Killing:** on timeout or abort the process gets `SIGTERM`, then `SIGKILL` after 5 seconds if it's still running. Only the last 64 KB of error output is kept in memory.
+On a timeout or abort, the backend sends the process `SIGTERM`, then `SIGKILL` 5 seconds later if it's still running. It keeps only the last 64 KB of error output in memory.
 
 ---
 
@@ -523,9 +523,9 @@ if (!done.ok) {
 
 ### Subscription vs API billing
 
-In print mode, Claude Code **always** uses `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` if they're set, which bills the API instead of your subscription. The CLI backend removes both from the child process environment unless you pass `useApiKey: true`. `claude:check` shows whether you're on the subscription.
+In print mode, Claude Code uses `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` whenever either is set, which bills the API instead of your subscription. The CLI backend removes both from the child process environment unless you pass `useApiKey: true`. `claude:check` shows whether you're on the subscription.
 
-`costUsd` is the **API-equivalent** price. On a subscription you aren't billed for it, but runs count toward your plan's usage limits.
+`costUsd` is what the run would cost on the API. A subscription doesn't bill you for it, but the run counts toward your plan's usage limits.
 
 ### What leaks into a run, and how to stop it
 
@@ -554,7 +554,7 @@ Tool-using runs still load the `CLAUDE.md` of their `cwd`. That's intended: a wo
 Set `traceDir` and every run writes two files:
 
 ```
-.orchestra/runs/
+.orca/runs/
   2026-09-30T18-01-53Z-3f2a91c0.jsonl       ← Claude's raw output, line for line
   2026-09-30T18-01-53Z-3f2a91c0.meta.json   ← request, CLI args, result, exit info, timing
 ```
@@ -577,7 +577,7 @@ This saves `fixtures/<name>.jsonl` and `fixtures/<name>.meta.json`. Tool runs wi
 
 ### Scrubbing
 
-Recordings are **scrubbed automatically**: your home folder path becomes `/home/user`, your OS username becomes `user`, and email addresses become `user@example.com`. To clean fixtures recorded before this:
+The recorder scrubs personal details as it saves. Your home folder path becomes `/home/user`, your OS username becomes `user`, and email addresses become `user@example.com`. To clean fixtures recorded before scrubbing existed:
 
 ```bash
 pnpm tsx packages/messenger/scripts/scrub-fixtures.ts
@@ -594,15 +594,15 @@ grep -l -i "<your-username>\|@gmail\|/Users/" packages/messenger/fixtures/*
 ## Testing
 
 ```bash
-pnpm --filter @orchestra/messenger test        # unit + integration tests, no Claude, < 1s
+pnpm --filter @orchestra/messenger test        # unit and integration tests; no Claude, under a second
 pnpm --filter @orchestra/messenger typecheck
 pnpm --filter @orchestra/messenger claude:check
 ```
 
 | Test file           | Covers                                                                                                           |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `normalize.test.ts` | Claude output → events; tool results matched by id; `max_turns` detection; every `*-real.jsonl` recording parses |
-| `finalize.test.ts`  | every way a run can end → the right `DoneEvent`                                                                  |
+| `normalize.test.ts` | turning Claude output into events, matching tool results to calls by id, detecting `max_turns`, and parsing every `*-real.jsonl` recording |
+| `finalize.test.ts`  | every way a run can end produces the right `DoneEvent` |
 | `run.test.ts`       | `done` always resolves, appears once and last; crashes become failed runs                                        |
 | `args.test.ts`      | request validation, defaults, CLI arguments, environment (API keys stripped, config folder)                      |
 | `fake.test.ts`      | `FakeMessenger` behaves like the real backend                                                                    |
@@ -636,6 +636,8 @@ it("classifies a parallel-only failure as test_data", async () => {
 ```
 
 ### Manual scripts
+
+`scripts/` holds 14 scripts. These are the ones you're most likely to run:
 
 | Script                               | Uses Claude      | Purpose                                                |
 | ------------------------------------ | ---------------- | ------------------------------------------------------ |
@@ -675,9 +677,9 @@ buildArgs + buildEnv ──▶ spawnClaude("claude -p … --output-format stream
                     run.events  ◀──────── done pushed last, stream closes
 ```
 
-- **`createRun`** starts the work immediately and connects it to an async queue, which is why `done` resolves even if nobody reads `events`.
-- **The result line is held, not emitted.** `finalize` combines it with how the process exited, so a crash after a result is still reported correctly, and `done` is emitted exactly once.
-- **`pumpLines`** (parse → normalize → emit) is shared by the CLI backend and `FakeMessenger`, so replayed runs go through exactly the same code as real ones.
+- `createRun` starts the work immediately and connects it to an async queue. That is why `done` resolves even if nobody reads `events`.
+- The normalizer holds the result line instead of emitting it. `finalize` combines it with how the process exited, so a crash after a result still reports correctly, and `done` is emitted exactly once.
+- `pumpLines` parses each line, normalizes it, and emits the event. The CLI backend and `FakeMessenger` both use it, so replayed runs go through the same code as real ones.
 
 ### Files
 
