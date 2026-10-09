@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "orca": "tsx packages/cli/src/index.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
