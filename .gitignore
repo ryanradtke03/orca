@@ -6,9 +6,8 @@ dist/
 out/
 *.tsbuildinfo
 
-# orchestra runtime state
-.orchestra/runs/
-.orchestra/worktrees/
+# orca runtime state (worktrees, traces, local PR sink)
+.orca/
 
 # logs
 *.log

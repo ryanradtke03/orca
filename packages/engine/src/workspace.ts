@@ -20,9 +20,9 @@ export interface Worktree {
   branch: string;
 }
 
-/** The default location for a run's worktrees, under the (gitignored) .orchestra dir. */
+/** The default location for a run's worktrees, under the (gitignored) .orca dir. */
 export function worktreeRoot(repo: string, worktreeDir?: string): string {
-  return worktreeDir ?? path.join(repo, ".orchestra", "worktrees");
+  return worktreeDir ?? path.join(repo, ".orca", "worktrees");
 }
 
 export interface WorktreeOptions {
@@ -111,16 +111,16 @@ export async function removeRunWorktrees(
 }
 
 /**
- * Make sure the repo ignores .orchestra/ even if it isn't in .gitignore, by
+ * Make sure the repo ignores .orca/ even if it isn't in .gitignore, by
  * adding it to .git/info/exclude. Best-effort: never throws.
  */
 export async function ensureExcluded(repo: string): Promise<void> {
   const excludePath = path.join(repo, ".git", "info", "exclude");
   try {
     const current = await readFile(excludePath, "utf8").catch(() => "");
-    if (current.split("\n").some((line) => line.trim() === ".orchestra/")) return;
+    if (current.split("\n").some((line) => line.trim() === ".orca/")) return;
     const prefix = current === "" || current.endsWith("\n") ? "" : "\n";
-    await appendFile(excludePath, `${prefix}.orchestra/\n`);
+    await appendFile(excludePath, `${prefix}.orca/\n`);
   } catch {
     // best effort — a non-standard .git layout just doesn't get the exclude
   }

@@ -1174,8 +1174,7 @@ async function verifyFixedPr(repo: string, head: string, out: BugToPrOutput): Pr
 /** Short, readable summary of a tool call: file paths made relative to the worktree. */
 function describeTool(name: string, input: unknown): string {
   const i = (input ?? {}) as Record<string, unknown>;
-  const rel = (p: unknown) =>
-    String(p ?? "").replace(/^.*\/\.orchestra\/worktrees\/[^/]+\/[^/]+\//, "");
+  const rel = (p: unknown) => String(p ?? "").replace(/^.*\/\.orca\/worktrees\/[^/]+\/[^/]+\//, "");
   switch (name) {
     case "Read":
     case "Edit":
