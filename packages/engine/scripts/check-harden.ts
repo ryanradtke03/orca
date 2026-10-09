@@ -66,7 +66,7 @@ async function orcaWorktrees(repo: string): Promise<string[]> {
   const { stdout } = await git(repo, ["worktree", "list", "--porcelain"]);
   return stdout
     .split("\n")
-    .filter((l) => l.startsWith("worktree ") && l.includes(".orchestra"))
+    .filter((l) => l.startsWith("worktree ") && l.includes(".orca"))
     .map((l) => l.slice("worktree ".length));
 }
 

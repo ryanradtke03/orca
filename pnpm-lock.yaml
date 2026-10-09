@@ -24,6 +24,24 @@ importers:
         specifier: ^5.0.2
         version: 5.0.2(@types/node@26.6.3)(vite@8.3.1(@types/node@26.6.3)(esbuild@0.28.2)(tsx@4.23.15))
 
+  packages/cli:
+    dependencies:
+      '@orchestra/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@orchestra/messenger':
+        specifier: workspace:*
+        version: link:../messenger
+      '@orchestra/recipes':
+        specifier: workspace:*
+        version: link:../recipes
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   packages/engine:
     dependencies:
       '@orchestra/messenger':

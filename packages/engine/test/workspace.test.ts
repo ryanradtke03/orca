@@ -39,11 +39,11 @@ describe("workspace", () => {
     expect(stdout).not.toContain(wt.path);
   });
 
-  it("ensureExcluded adds .orchestra/ once", async () => {
+  it("ensureExcluded adds .orca/ once", async () => {
     await ensureExcluded(repo);
     await ensureExcluded(repo); // idempotent
     const exclude = await readFile(path.join(repo, ".git", "info", "exclude"), "utf8");
-    const occurrences = exclude.split("\n").filter((l) => l.trim() === ".orchestra/").length;
+    const occurrences = exclude.split("\n").filter((l) => l.trim() === ".orca/").length;
     expect(occurrences).toBe(1);
   });
 });

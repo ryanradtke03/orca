@@ -1,6 +1,6 @@
 # @orchestra/engine
 
-The orchestration layer. Where [`@orchestra/messenger`](../messenger) runs **one** Claude call, the engine runs a whole **job**: it takes a recipe and its input, plans tasks, runs each task's worker in its own git worktree through the messenger, checks the work with code gates, retries with feedback, enforces budgets, and returns one final result.
+The engine runs a whole job. [`@orchestra/messenger`](../messenger) runs a single Claude Code call. The engine takes a recipe and its input, plans tasks, runs each task's worker in its own git worktree through the messenger, checks the work with gates, retries with feedback, enforces budgets, and returns one result.
 
 ```ts
 import { createEngine } from "@orchestra/engine";
@@ -19,13 +19,13 @@ const result = await run.done; // always resolves, never throws
 console.log(result.status, `$${result.costUsd.toFixed(3)}`);
 ```
 
-- **Engine is _how_, recipe is _what_.** The engine owns the generic mechanics (plan → schedule → isolate → gate → retry → finish). Recipes supply the job-specific decisions (which tasks, which gates, what output).
-- **Code decides whether work counts.** A worker never grades itself. Gates run after each attempt; rejection reasons are fed back verbatim into the next attempt's prompt.
-- **Your checkout is safe.** Workers only ever run in git worktrees under `.orchestra/worktrees`, on their own branches. Nothing is merged into your branch automatically.
-- **Never throws.** `start()` never throws; `run.done` always resolves. Every exit — success, failure, budget stop, cancel — is a clean `RunResult` with a `status` and (on error) an `error.kind`.
-- **Swappable messenger.** Code written against the `Messenger` interface works with the real CLI backend and the test `ScriptedMessenger` alike.
+Five rules shape the design.
 
----
+- **The engine owns the mechanics, the recipe owns the decisions.** The engine plans, schedules, isolates, gates, retries, and finishes. A recipe decides which tasks exist, which gates apply, and what the output is.
+- **Code decides whether work counts.** A worker never grades itself. Gates run after each attempt, and the engine copies their rejection reasons into the next attempt's prompt.
+- **Your checkout stays put.** Workers run only in git worktrees under `.orca/worktrees`, each on its own `orca/<run>/<task>-<attempt>` branch. The engine never merges into your branch.
+- **Nothing throws.** `start()` never throws and `run.done` always resolves. Success, failure, a budget stop, and a cancel all end in a `RunResult` with a `status`, plus an `error.kind` when something went wrong.
+- **The messenger is swappable.** Code written against the `Messenger` interface works with the real CLI backend and with test messengers.
 
 ## Contents
 
@@ -33,155 +33,143 @@ console.log(result.status, `$${result.costUsd.toFixed(3)}`);
 2. [Concepts](#concepts)
 3. [API](#api)
 4. [Recipes](#recipes)
-5. [Events & results](#events--results)
-6. [Gates](#gates)
-7. [Testing](#testing)
-8. [How it works](#how-it-works)
-
----
+5. [Chains](#chains)
+6. [Events and results](#events-and-results)
+7. [Gates](#gates)
+8. [Testing](#testing)
+9. [How it works](#how-it-works)
 
 ## Requirements
 
-- Node 22+
-- git (the engine shells out to `git worktree`)
-- For **real** runs: [Claude Code](https://code.claude.com) installed and logged in (the CLI messenger backend spawns `claude -p`)
+- Node 20 or later, per the root `package.json`.
+- git. The engine shells out to `git worktree`.
+- For real runs, [Claude Code](https://code.claude.com) installed and logged in. The CLI messenger backend spawns `claude -p`.
 
-Inside the monorepo, depend on it through the workspace:
+Inside the monorepo, depend on the engine through the workspace:
 
 ```jsonc
 { "dependencies": { "@orchestra/engine": "workspace:*" } }
 ```
 
----
-
 ## Concepts
 
-| Piece | Owned by | Examples |
+| Piece | Owned by | Where |
 | --- | --- | --- |
-| Flow: plan → tasks → workers → gates → finish | **engine** | always the same |
-| Scheduling: dependency order, parallel workers, `maxWorkers` | **engine** | — |
-| Isolation, budgets, cancel, retries, events, traces | **engine** | — |
-| Which tasks exist and what depends on what | **recipe** | `plan()` |
-| How each task's worker runs (prompt, tools, paths) | **recipe** | `worker()` |
-| Which checks decide "good work" | **recipe** | `gates` |
-| The final output (PR, patch, report) | **recipe** | `finish()` |
+| The flow: plan, tasks, workers, gates, finish | engine | always the same |
+| Scheduling: dependency order, parallel workers, `maxWorkers` | engine | |
+| Isolation, budgets, cancel, retries, events, traces | engine | |
+| Which tasks exist and what depends on what | recipe | `plan()` |
+| How each task's worker runs: prompt, tools, paths | recipe | `worker()` |
+| Which checks decide whether work is good | recipe | `gates` |
+| The final output, such as a patch or a report | recipe | `finish()` |
+| A sequence of child runs and steps | chain | `run()` |
 
-Rule of thumb: if the same decision logic shows up in two recipes, it belongs in the engine or in `shared/`.
-
----
+If the same decision logic shows up in two recipes, move it into the engine.
 
 ## API
 
-At a glance:
-
 ```ts
-createEngine(config)                 → Engine            // one per app
-engine.start(recipe, input, opts?)   → EngineRun         // starts immediately
-engine.recipes()                     → RecipeInfo[]      // sync
-engine.runs()                        → Promise<RunSummary[]>
-engine.get(runId)                    → EngineRun | undefined
+createEngine(config): Engine                       // one per app
+engine.start(name, input, opts?): EngineRun        // starts immediately
+engine.recipes(): RecipeInfo[]                     // synchronous
+engine.runs(): Promise<RunSummary[]>
+engine.get(runId): EngineRun | undefined
 
-run.id                               : string
-run.events                           : AsyncIterable<EngineEvent>
-run.done                             : Promise<RunResult> // always resolves
-run.cancel()                         → void
-run.approve(ok: boolean)             → void
+run.id: string
+run.events: AsyncIterable<EngineEvent>
+run.done: Promise<RunResult>                       // always resolves
+run.cancel(): void
+run.approve(ok: boolean): void
 ```
 
----
+### `createEngine(config)`
 
-### `createEngine(config)` → `Engine`
-
-Builds one engine. Cheap and synchronous — nothing runs until `start()`. You normally make one per app (CLI, Electron main process, backend) and reuse it.
+Builds one engine. It is synchronous and does no work until you call `start()`. Make one per app, such as a CLI or an Electron main process, and reuse it.
 
 ```ts
 const engine = createEngine({
   repo: "/path/to/repo",
   messenger: createMessenger({ backend: "cli" }),
   recipes: builtInRecipes,
+  pr: localSink({ dir: "/path/to/repo/.orca" }),
   limits: { maxWorkers: 2, maxCostUsd: 3 },
-  traceDir: ".orchestra/runs",
+  traceDir: "/path/to/repo/.orca/traces",
 });
 ```
 
-**`config: EngineConfig`**
+`config: EngineConfig`
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `repo` | `string` | **required** | Absolute path to the git repo the engine works on. Worktrees are cut from its current `HEAD`. |
-| `messenger` | `Messenger` | **required** | Anything implementing `Messenger.send()` — the real CLI backend, the test `ScriptedMessenger`, or a future SDK backend. |
-| `recipes` | `Record<string, Recipe>` | **required** | The registry `start()` looks names up in. A name that isn't here → `unknown_recipe`. |
-| `limits` | `Partial<EngineLimits>` | see below | Run caps. Any subset; the rest fall back to defaults. |
-| `worktreeDir` | `string` | `<repo>/.orchestra/worktrees` | Where per-task worktrees are created. Gitignored, and auto-added to `.git/info/exclude`. |
-| `traceDir` | `string` | _none_ | If set, each run writes `events.jsonl` + `summary.json` under `<traceDir>/<runId>/`. Required for `engine.runs()` to return anything. |
-| `keepWorktrees` | `"always" \| "on-failure" \| "never"` | `"on-failure"` | What to do with worktrees after a run. `on-failure` keeps only failed tasks' worktrees for debugging; a cancelled run always cleans everything. |
+| `repo` | `string` | required | Absolute path to the git repo. Worktrees are cut from `HEAD`, or from the `base` start option. |
+| `messenger` | `Messenger` | required | Anything with a `send()` method, such as the CLI backend or `FakeMessenger`. |
+| `recipes` | `Record<string, Registered>` | required | The registry `start()` looks names up in. Each entry is a recipe or a chain. An unknown name ends the run with `unknown_recipe`. |
+| `pr` | `PrSink` | none | Where chains read issues, open PRs, and comment. Use `githubSink` or `localSink`. Without one, any PR call from a chain fails with "no PR sink configured on the engine". |
+| `limits` | `Partial<EngineLimits>` | see below | Run caps. Any field you leave out uses the default. |
+| `worktreeDir` | `string` | `<repo>/.orca/worktrees` | Where per-task worktrees go. The engine adds `.orca/` to `.git/info/exclude`. |
+| `traceDir` | `string` | none | When set, each run writes `events.jsonl` and `summary.json` under `<traceDir>/<runId>/`. `engine.runs()` returns nothing without it. |
+| `keepWorktrees` | `"always" \| "on-failure" \| "never"` | `"on-failure"` | What happens to worktrees after a run. `on-failure` keeps only failed tasks' worktrees for debugging. A cancelled run always cleans everything. |
 
-**`EngineLimits`** (all optional in `config.limits`, filled with these defaults):
+`EngineLimits` defaults:
 
-| Field | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `maxWorkers` | `number` | `2` | How many tasks may run at the same time. |
-| `maxAttempts` | `number` | `3` | Worker attempts per task before it's marked failed. |
-| `maxCostUsd` | `number` | `3` | Total USD across all workers in the run. Re-checked between scheduling waves; when hit, the run stops as `partial` with `error.kind: "budget"`. |
-| `maxDurationMs` | `number` | `1_800_000` (30 min) | Wall-clock cap for the run → `partial` / `timeout`. |
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `maxWorkers` | `2` | How many tasks run at the same time. |
+| `maxAttempts` | `3` | Worker attempts per task before the task fails. |
+| `maxCostUsd` | `3` | Total USD across all workers in the run. When the run hits it, it stops as `partial` with `error.kind: "budget"`. |
+| `maxDurationMs` | `1_800_000`, 30 minutes | Wall-clock cap. Hitting it ends the run as `partial` with `error.kind: "timeout"`. |
 
-> **Budget granularity.** Cost and time are checked _between_ tasks/waves, not mid-worker. With `maxWorkers > 2`, several tasks in one wave can push spend past `maxCostUsd` before the next check — you can't un-spend a worker that's already running. A `budget.warning` event fires once at 80% of each cap.
+The engine checks cost and time between tasks and scheduling waves, not in the middle of a worker. A worker that is already running finishes and spends what it spends, so one wave can push the total past `maxCostUsd` before the next check. A `budget.warning` event fires once when a run reaches 80% of each cap.
 
----
+### `engine.start(name, input, opts?)`
 
-### `engine.start(name, input, opts?)` → `EngineRun`
-
-Starts a job **immediately** and returns a handle. Never throws — a bad name, bad input, or a crash all come back through `run.done` as a `RunResult` with `ok: false`.
+Starts a job right away and returns a handle. It never throws. A bad name, bad input, or a crash all come back through `run.done` as a `RunResult` with `ok: false`.
 
 ```ts
 const run = engine.start("fix-ci", { command: "npx tsc --noEmit" }, {
   signal: controller.signal,
   approvePlan: true,
   limits: { maxCostUsd: 1 },
+  base: "main",
 });
 ```
 
-**Parameters**
-
 | Param | Type | Description |
 | --- | --- | --- |
-| `name` | `string` | Key into the `recipes` registry. Unknown → run ends `unknown_recipe`. |
-| `input` | `unknown` | Validated against the recipe's Zod `input` schema before anything runs. Invalid → `invalid_input`, and **no worker is spawned**. |
-| `opts?` | `StartOptions` | Per-run overrides (below). |
+| `name` | `string` | A key in the `recipes` registry. An unknown name ends the run with `unknown_recipe`. |
+| `input` | `unknown` | The engine validates it against the recipe's Zod `input` schema before anything runs. Invalid input ends the run with `invalid_input`, and no worker starts. |
+| `opts` | `StartOptions` | Optional per-run settings, below. |
 
-**`opts: StartOptions`** (all optional)
+`opts: StartOptions`, all optional:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `signal` | `AbortSignal` | _none_ | A caller-owned signal. Aborting it is equivalent to `run.cancel()`: workers stop, worktrees are cleaned, the run ends `cancelled`. Passing an already-aborted signal cancels immediately. |
-| `approvePlan` | `boolean` | `false` | When `true`, after planning the run emits `plan.ready` then `approval.needed` and **waits** for `run.approve(ok)`. `approve(false)` (or a cancel) ends the run `cancelled` before any worker runs. |
-| `limits` | `Partial<EngineLimits>` | inherits `config.limits` | Overrides just for this run, merged over the engine's limits. |
+| `signal` | `AbortSignal` | none | Aborting it is the same as calling `run.cancel()`. Workers stop, worktrees are cleaned, and the run ends `cancelled`. A signal that is already aborted cancels immediately. |
+| `approvePlan` | `boolean` | `false` | When `true`, the run emits `plan.ready` and `approval.needed` after planning, then waits for `run.approve(ok)`. `approve(false)` or a cancel ends the run `cancelled` before any worker runs. |
+| `limits` | `Partial<EngineLimits>` | `config.limits` | Overrides for this run only, merged over the engine's limits. |
+| `base` | `string` | `"HEAD"` | A branch or commit to run against. |
 
----
+### `engine.recipes()`
 
-### `engine.recipes()` → `RecipeInfo[]`
-
-Synchronous. Describes every registered recipe — for CLI `--help`, an Electron dropdown, or building an input form.
+Synchronous. Describes every registered recipe and chain, for CLI help or for building an input form.
 
 ```ts
 interface RecipeInfo {
   name: string;
   description: string;
-  inputSchema: unknown; // JSON Schema, generated from the recipe's Zod input
+  inputSchema: unknown; // JSON Schema generated from the recipe's Zod input
 }
 ```
 
-`inputSchema` comes from `z.toJSONSchema(recipe.input)`; a schema Zod can't serialize yields `{}` rather than throwing.
+The engine generates `inputSchema` from the Zod schema. A schema that Zod can't convert produces `{}` instead of an error.
 
----
+### `engine.runs()`
 
-### `engine.runs()` → `Promise<RunSummary[]>`
-
-Reads finished runs back from `traceDir`, **newest first**. Returns `[]` if no `traceDir` is configured or the folder doesn't exist yet.
+Reads finished runs from `traceDir`, newest first. It returns `[]` when there is no `traceDir` or the folder doesn't exist yet.
 
 ```ts
 interface RunSummary {
-  id: string;         // == the run's id / trace folder name
+  id: string;         // the run id, which is also the trace folder name
   finishedAt: string; // ISO timestamp
   status: "completed" | "partial" | "failed" | "cancelled";
   ok: boolean;
@@ -191,52 +179,46 @@ interface RunSummary {
 }
 ```
 
-To load a past run's full detail, read `summary.json` (the `RunResult`) or `events.jsonl` under `tracePath`.
+For a past run's full detail, read `summary.json`, which holds the `RunResult`, or `events.jsonl` under `tracePath`.
 
----
+### `engine.get(runId)`
 
-### `engine.get(runId)` → `EngineRun | undefined`
-
-Returns a run **still in progress**, so a UI can reattach to its `events`/`done` after navigating away. Backed by an in-memory registry that clears the moment a run finishes, so a completed run returns `undefined` — use `runs()` for history.
-
----
+Returns a run that is still in progress, so a UI can reattach to its `events` and `done` after navigating away. The engine drops a run from this registry when it finishes, so a completed run returns `undefined`. Use `runs()` for history.
 
 ### The `EngineRun` handle
 
-Returned by `start()` (and `get()`).
+`start()` and `get()` return it.
 
 | Member | Type | Description |
 | --- | --- | --- |
-| `id` | `string` | The run id, also its trace folder name. Generated as `run-<timestamp>-<rand>`. |
-| `events` | `AsyncIterable<EngineEvent>` | The live event stream. Iterate with `for await`. Yields until `run.done` (a `run.done` event is the last item), then completes. Not iterating does **not** stall the run — `done` resolves regardless. |
-| `done` | `Promise<RunResult>` | Resolves once, with the final result. **Never rejects** — failures are `ok: false` with an `error.kind`. |
-| `cancel()` | `() => void` | Aborts the run: signals workers via the messenger, cleans up worktrees, and ends the run `cancelled`. Safe to call any time (including while paused for approval, which it resolves as rejected). |
-| `approve(ok)` | `(ok: boolean) => void` | Answers an `approval.needed` prompt. `true` proceeds; `false` cancels. No-op if the run isn't waiting on approval. |
+| `id` | `string` | The run id, `run-<timestamp>-<random>`. It is also the trace folder name. |
+| `events` | `AsyncIterable<EngineEvent>` | The live event stream. The last item is a `run.done` event, then the stream ends. The run doesn't wait for you to read it, so `done` resolves either way. |
+| `done` | `Promise<RunResult>` | Resolves once with the final result. It never rejects. Failures have `ok: false` and an `error.kind`. |
+| `cancel()` | `() => void` | Stops the run: the engine signals workers through the messenger, removes worktrees, and ends the run `cancelled`. You can call it at any time, including while the run waits for approval. |
+| `approve(ok)` | `(ok: boolean) => void` | Answers `approval.needed`. `true` continues and `false` cancels. It does nothing if the run isn't waiting. |
 
-A typical consumer reads both — the stream for progress, the promise for the outcome:
+Read the stream for progress and the promise for the outcome:
 
 ```ts
 const run = engine.start("fix-ci", { command: "npx tsc --noEmit" });
 
 for await (const e of run.events) {
-  if (e.type === "task.started") console.log(`▶ ${e.taskId} (attempt ${e.attempt})`);
-  if (e.type === "gate.failed")  console.log(`  ✗ ${e.gate}: ${e.reasons.join("; ")}`);
-  if (e.type === "task.done")    console.log(`  ✓ ${e.taskId} $${e.costUsd.toFixed(3)}`);
+  if (e.type === "task.started") console.log(`start ${e.taskId} (attempt ${e.attempt})`);
+  if (e.type === "gate.failed")  console.log(`  fail ${e.gate}: ${e.reasons.join("; ")}`);
+  if (e.type === "task.done")    console.log(`  done ${e.taskId} $${e.costUsd.toFixed(3)}`);
 }
 
 const result = await run.done;
 ```
 
-> In a request/response server, don't `await run.done` inside the handler — jobs take minutes. Return `run.id`, then stream `engine.get(id).events` over SSE and let the run finish in the background.
-
----
+Jobs take minutes, so a request/response server shouldn't `await run.done` inside a handler. Return `run.id`, stream `engine.get(id).events` over SSE, and let the run finish in the background.
 
 ## Recipes
 
-A recipe is an object with hooks. The engine looks it up by name and calls the hooks at the right moments; it never contains job logic itself.
+A recipe is an object with hooks. The engine looks it up by name and calls each hook at the right point. The engine itself holds no job logic.
 
 ```ts
-import { defineRecipe, commandPasses, noPattern } from "@orchestra/engine";
+import { commandPasses, defineRecipe, noPattern } from "@orchestra/engine";
 import { z } from "zod";
 
 export const fixCi = defineRecipe({
@@ -254,7 +236,7 @@ export const fixCi = defineRecipe({
   }),
   gates: [
     commandPasses((task) => String(task.context["command"])), // must exit 0
-    noPattern([/@ts-ignore/, /eslint-disable/]),               // no cheating
+    noPattern([/@ts-ignore/, /eslint-disable/]),               // no suppressions
   ],
   async finish(results) {
     return { fixed: results.every((r) => r.ok) };
@@ -262,91 +244,137 @@ export const fixCi = defineRecipe({
 });
 ```
 
-Tasks can depend on each other; independent tasks run in parallel up to `maxWorkers`. A task whose dependency failed (or was skipped) is skipped transitively.
+This example is a simplified version of the real `fix-ci`, which defaults `command` to `pnpm check` and uses more gates.
 
-The built-in recipes live in [`@orchestra/recipes`](../recipes): `fix-ci` and `add-component` (which fans out a component into a parallel test + story).
+Tasks can depend on each other. Independent tasks run in parallel, up to `maxWorkers`. When a task fails or is skipped, the engine skips every task that depends on it.
+
+The built-in recipes live in [`@orchestra/recipes`](../recipes): `fix-ci`, `fix-lint`, `update-tests`, `repro-bug`, `pr-review`, `pr-describe`, and `add-component`, plus the `bug-to-pr` chain.
 
 ### Contract reference
 
-Every hook the engine calls, and when:
-
 | Hook | Signature | Called | Decides |
 | --- | --- | --- | --- |
-| `input` | `z.ZodType<Input>` | before anything runs | the shape of valid input; invalid → `invalid_input` |
+| `input` | `z.ZodType<Input>` | before anything runs | the shape of valid input |
 | `plan` | `(input, ctx) => Promise<Task[]>` | once, after validation | which tasks exist and their dependencies |
-| `worker` | `(task, ctx) => WorkerConfig` | per task attempt | how that attempt's Claude call runs |
-| `gates` | `Gate[]` | after each attempt | whether the attempt counts as done |
-| `onFailed?` | `(task, reasons, ctx) => Promise<void>` | when a task exhausts `maxAttempts` | side effects on give-up (quarantine, report…) |
+| `worker` | `(task, ctx) => WorkerConfig` | once per task attempt | how that attempt's Claude call runs |
+| `gates` | `Gate[]` | after each attempt | whether the attempt counts |
+| `onFailed` | `(task, reasons, ctx) => Promise<void>` | when a task runs out of attempts | optional side effects, such as filing a report |
 | `finish` | `(results, ctx) => Promise<Output>` | once, after all tasks | the run's `output` |
 
-`defineRecipe({ ... })` is just an identity helper that infers `Input` from the Zod schema so `plan`/`worker`/`finish` are fully typed.
+`defineRecipe({ ... })` returns its argument unchanged. It exists so TypeScript infers `Input` from the Zod schema and types `plan`, `worker`, and `finish`.
 
-**`Task`** — one unit of work. `context` is your bag of per-task data (read it back in `worker`/`gates`).
+A `Task` is one unit of work. `context` holds your per-task data, which you read back in `worker` and in gates.
 
 ```ts
 interface Task { id: string; goal: string; dependsOn: string[]; context: Record<string, unknown>; }
 ```
 
-**`WorkerConfig`** — what `worker()` returns; passed straight to `messenger.send()`.
+`worker()` returns a `WorkerConfig`, which the engine passes to `messenger.send()`:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `prompt` | `string` | The task prompt. On a retry, the engine prepends the previous attempt's rejection reasons. |
-| `tools` | `string[]` | Allowed tools, e.g. `["Read", "Edit", "Bash(npm test)"]`. |
-| `allowEdits?` | `string[]` | Path globs the worker should stay within (enforce with the `onlyTouches` gate). |
-| `maxTurns?` | `number` | Cap on the worker's turns. |
-| `model?` | `string` | e.g. `"sonnet"`, `"haiku"`. |
-| `system?` | `string` | Extra system prompt. |
+| `prompt` | `string` | The task prompt. On a retry, the engine adds the previous attempt's rejection reasons to it. |
+| `tools` | `string[]` | Allowed tools, such as `["Read", "Edit", "Bash(npm test)"]`. |
+| `allowEdits` | `string[]` | Optional path globs the worker should stay within. The `onlyTouches` gate enforces them. |
+| `maxTurns` | `number` | Optional cap on the worker's turns. |
+| `model` | `string` | Optional model, such as `"sonnet"` or `"haiku"`. |
+| `system` | `string` | Optional extra system prompt. |
 
-**`ctx: Ctx`** — passed to `plan`/`worker`/`gates`/`finish`. The engine owns it; recipes read from it.
+The engine passes a `ctx: Ctx` to `plan`, `worker`, `onFailed`, and `finish`:
 
 | Member | Type | Use |
 | --- | --- | --- |
 | `repo` | `string` | The target repo path. |
-| `messenger` | `Messenger` | For recipes that run their own planner/triage agents via `askJson`. |
+| `messenger` | `Messenger` | For recipes that run their own planner or triage call with `askJson`. |
 | `signal` | `AbortSignal` | Aborted when the run is cancelled. |
-| `emit` | `(event) => void` | Emit a custom engine event onto the stream. |
+| `emit` | `(event) => void` | Puts an event on the run's stream. |
+| `exec` | `(cmd, opts?) => Promise<{ code, output }>` | Runs a command in the repo root, so `plan()` can check whether there is anything to do. |
 
-**`Gate` / `GateContext`** — a gate is `{ name, check(ctx) }` returning `{ ok: true }` or `{ ok: false, reasons }`. Its `ctx` gives the evidence:
+A gate is `{ name, check(ctx) }`. `check` returns `{ ok: true }` or `{ ok: false, reasons }`. Its `GateContext` holds the evidence:
 
 ```ts
 interface GateContext {
-  worktree: string;                     // the attempt's checkout
+  worktree: string;       // the attempt's checkout
   task: Task;
-  diff: string;                         // staged diff vs HEAD
+  diff: string;           // staged diff against the attempt's base
   changedFiles: string[];
-  exec(cmd, opts?): Promise<{ code; stdout; stderr }>; // run a command in the worktree
+  output: string;         // the worker's final message, for read-only recipes
+  exec(cmd, opts?): Promise<{ code; stdout; stderr }>; // runs a command in the worktree
 }
 ```
 
----
+## Chains
 
-## Events & results
+A chain runs other recipes as child runs and adds plain-code steps between them. It has no `plan`, `worker`, or `gates`. `bug-to-pr` is a chain.
 
-`run.events` streams typed `EngineEvent`s. Every event has a `type`; the discriminated union means narrowing on `type` gives you the right fields.
+```ts
+import { defineChain } from "@orchestra/engine";
+import { z } from "zod";
 
-| `type` | Fires when | Key fields |
+export const example = defineChain({
+  name: "example",
+  description: "Fix a command, then describe the change",
+  input: z.object({ command: z.string() }),
+  async run(input, ctx) {
+    const fix = await ctx.run("fix-ci", { command: input.command });
+    if (!fix.ok) return { status: "fix-failed" };
+    const diff = fix.tasks[0]?.diff ?? "";
+    const sha = await ctx.step("commit", () =>
+      ctx.git.commit("orca/example", { diff, message: "fix: make the command pass" }),
+    );
+    return { status: "committed", sha };
+  },
+});
+```
+
+A chain's `run(input, ctx)` gets a `ChainCtx`, which is a `Ctx` plus these members:
+
+| Member | Use |
+| --- | --- |
+| `run(name, input, opts?)` | Starts a child run and resolves to its `RunResult`. It never throws. `opts.base` picks the ref, and `opts.limits` can tighten the child's limits but never loosen them past the parent's. |
+| `step(name, fn)` | Runs `fn` and emits `step.started` and `step.done` around it. |
+| `git.commit(branch, { from?, diff, message })` | Applies a diff with `git apply --index` in a throwaway worktree and commits it to `branch`. Resolves to the commit sha. Your checkout never moves. |
+| `git.push(branch)` | Pushes a branch. It only pushes `orca/*` branches. |
+| `pr` | The engine's `PrSink`: `readIssue(n)`, `open({ branch, base, title, body, draft })`, and `comment(issue, body)`. |
+| `runId` | The chain's run id. |
+
+Child runs can nest up to 3 levels deep. A child run past that limit ends with `plan_failed`. If `run()` throws, the chain ends with `plan_failed` and the error message. A chain's `RunResult` has an empty `tasks` list. Its `output` is whatever `run()` returned.
+
+### PR sinks
+
+`githubSink({ repo, remote? })` uses `gh` and `git push` against the repo's remote, `origin` by default. `localSink({ dir })` writes issues, PRs, and comments as files under `dir`, so you can try a chain without touching GitHub. The `orca` CLI uses `<repo>/.orca` as the local sink's folder.
+
+## Events and results
+
+`run.events` yields typed `EngineEvent`s. Each event has a `type`, and narrowing on `type` gives you its fields.
+
+| `type` | Fires when | Fields |
 | --- | --- | --- |
-| `run.started` | input validated, job accepted | `recipe`, `input` |
-| `plan.ready` | tasks decided | `tasks: { id, goal, dependsOn }[]` |
-| `approval.needed` | waiting on `run.approve()` (only with `approvePlan`) | `what` (e.g. `"plan"`) |
-| `task.started` | a worker attempt began | `taskId`, `attempt`, `worktree` |
-| `worker.event` | a messenger event from that worker | `taskId`, `event` (the raw `MessengerEvent`) |
-| `gate.passed` / `gate.failed` | a gate ran | `taskId`, `gate`, (`reasons` on fail) |
-| `task.retrying` | gates failed, trying again | `taskId`, `attempt`, `reasons` |
+| `run.started` | the job is accepted | `recipe`, `input` |
+| `plan.ready` | the recipe has decided its tasks | `tasks: { id, goal, dependsOn }[]` |
+| `approval.needed` | the run waits on `run.approve()`, only with `approvePlan` | `what`, such as `"plan"` |
+| `task.started` | a worker attempt begins | `taskId`, `attempt`, `worktree` |
+| `worker.event` | the worker's messenger emits an event | `taskId`, `event`, the raw `MessengerEvent` |
+| `gate.passed` | a gate passed | `taskId`, `gate` |
+| `gate.failed` | a gate failed | `taskId`, `gate`, `reasons` |
+| `task.retrying` | gates failed and the task tries again | `taskId`, `attempt`, `reasons` |
 | `task.done` | a task succeeded | `taskId`, `attempts`, `costUsd` |
-| `task.failed` | a task exhausted its attempts | `taskId`, `reasons` |
-| `task.skipped` | a dependency failed/was skipped | `taskId`, `reason` |
-| `budget.warning` | 80% of a cap reached | `resource` (`"cost"`/`"duration"`), `used`, `limit` |
-| `run.done` | the end | `result` (the `RunResult`) |
+| `task.failed` | a task used up its attempts | `taskId`, `reasons` |
+| `task.skipped` | a dependency failed or was skipped | `taskId`, `reason` |
+| `budget.warning` | the run reached 80% of a cap | `resource` (`"cost"` or `"duration"`), `used`, `limit` |
+| `step.started`, `step.done` | a chain step starts or ends | `name` |
+| `child.started` | a chain starts a child run | `childRunId`, `recipe` |
+| `child.event` | the child run emits an event | `childRunId`, `recipe`, `event` |
+| `child.done` | the child run ends | `childRunId`, `recipe`, `result` |
+| `run.done` | the run ends | `result`, the `RunResult` |
 
-`run.done` (the promise) resolves to a `RunResult`:
+`run.done`, the promise, resolves to a `RunResult`:
 
 ```ts
 interface RunResult {
   ok: boolean;
   status: "completed" | "partial" | "failed" | "cancelled";
-  output?: unknown;                 // whatever the recipe's finish() returned
+  output?: unknown;                 // what the recipe's finish() or the chain's run() returned
   tasks: { id; ok; attempts; costUsd; diff?; failures? }[];
   costUsd: number;
   durationMs: number;
@@ -355,48 +383,52 @@ interface RunResult {
 }
 ```
 
-`error.kind` is one of `unknown_recipe`, `invalid_input`, `plan_failed`, `finish_failed`, `budget`, `timeout`, `cancelled`. Task-level failures (gates never passed) don't set `error` — they show up in `tasks[].failures` and make the status `partial` or `failed`.
-
----
+`error.kind` is one of `unknown_recipe`, `invalid_input`, `plan_failed`, `finish_failed`, `budget`, `timeout`, or `cancelled`. A task whose gates never passed doesn't set `error`. It shows up in `tasks[].failures` and makes the status `partial` or `failed`.
 
 ## Gates
 
-Ready-made, composable checks a recipe lists in `gates`:
+A recipe lists gates in `gates`. These ship with the engine:
 
 | Gate | Fails when |
 | --- | --- |
-| `commandPasses(cmd)` | the command doesn't exit 0 (tail of its output becomes the reason) |
-| `noPattern(regexes)` | an **added** diff line matches a disallowed pattern |
-| `onlyTouches(globs)` | a changed file falls outside the allowed globs |
-| `filesExist(paths)` | a required file is missing from the worktree |
+| `commandPasses(cmd)` | the command exits non-zero. The tail of its output becomes the reason. |
+| `commandFails(cmd)` | the command exits 0. `repro-bug` uses it to require a test that fails on the current code. |
+| `failsWithAssertion(command, parse)` | any failing test failed for a reason other than an assertion, or a second run fails a different set of tests. Catches crashes and flaky tests posing as a reproduction. |
+| `failsOnBase(base, srcGlob, test)` | the changed tests still pass when the files matching `srcGlob` are reverted to the `base` commit. That means the tests don't check the change. |
+| `countNotLess(pattern, files)` | a pattern, such as `expect(`, matches fewer times in a file than it did at `HEAD`. Stops a worker from deleting assertions. |
+| `noPattern(regexes)` | a line the attempt added matches a pattern. Lines already in the file don't count. |
+| `onlyTouches(globs)` | the attempt changed a file outside the allowed globs. |
+| `noFileChanges(regexes)` | the attempt changed a file whose path matches a pattern. Use it to protect tests, config, and lockfiles. |
+| `filesExist(paths)` | a required file is missing from the worktree. |
+| `outputMatches(schema)` | the worker's final message isn't JSON that matches the Zod schema. For read-only recipes. |
+| `anchoredInDiff(hunks)` | a review comment points at a line the diff didn't change. |
+| `mentionsOnlyDiffFiles(files)` | the listed changes name a file outside the diff, or skip a changed file. |
+| `closesIssue(issue)` | a PR description doesn't link the issue it was given. |
+| `claimsMatchEvidence(evidence)` | a PR description claims testing that no recipe or passed gate backs up. |
 
-A gate is just `{ name, check(ctx) }`, so recipes can define their own inline (see `add-component`'s `fileCreated`).
-
----
+`cmd`, `globs`, and similar arguments can also be functions of the task, so one recipe can read them from `task.context`. A gate is `{ name, check(ctx) }`, so a recipe can define its own inline. `add-component`'s `fileCreated` is an example.
 
 ## Testing
 
-### The automated suite (no Claude, no network)
-
-The tests use a temporary git repo and a `ScriptedMessenger` that actually edits the worktree, so the whole loop is exercised deterministically:
+The automated suite uses a temporary git repo and a test messenger that edits the worktree, so it runs the whole loop without Claude or the network:
 
 ```bash
-pnpm --filter @orchestra/engine test        # 36 tests across workspace/gates/task/scheduler/engine
+pnpm --filter @orchestra/engine test
 pnpm --filter @orchestra/engine typecheck
 ```
 
-There are also standalone check scripts that print what's happening, handy while developing:
+Standalone check scripts print each stage as it runs:
 
 ```bash
-pnpm --filter @orchestra/engine exec tsx scripts/check-skeleton.ts   # phase 1: a diff comes back
-pnpm --filter @orchestra/engine exec tsx scripts/check-gates.ts      # phase 2: gates + retry
-pnpm --filter @orchestra/engine exec tsx scripts/check-harden.ts     # phase 3: validation/budget/cancel
-pnpm --filter @orchestra/engine exec tsx scripts/check-scheduler.ts  # phase 4: scheduler + approval
+pnpm --filter @orchestra/engine exec tsx scripts/check-skeleton.ts   # a diff comes back
+pnpm --filter @orchestra/engine exec tsx scripts/check-gates.ts      # gates and retry
+pnpm --filter @orchestra/engine exec tsx scripts/check-harden.ts     # validation, budget, cancel
+pnpm --filter @orchestra/engine exec tsx scripts/check-scheduler.ts  # scheduler and approval
 ```
 
-### A real end-to-end run (drives Claude)
+### A real end-to-end run
 
-Needs Claude Code logged in. Point the demo at a scratch repo with something broken:
+This drives Claude Code, so it needs a login. Point the demo at a scratch repo with a type error:
 
 ```bash
 # make a throwaway repo with one type error
@@ -406,16 +438,14 @@ printf 'export const n: number = "not a number";\n' > index.ts
 git add -A && git commit -qm initial
 
 # from the orca repo, run fix-ci against it
-cd -  # back to the monorepo
+cd -
 pnpm --filter @orchestra/recipes demo /tmp/orca-demo "npx tsc --noEmit"
 ```
 
-You'll see the events stream, the final `RunResult`, and the diff Claude produced — all on a branch in `/tmp/orca-demo/.orchestra/worktrees/`, never on your checkout.
-
----
+The script prints the event stream, the final `RunResult`, and the diff Claude produced. The work happens in worktrees under `/tmp/orca-demo/.orca/worktrees/`, and the repo's own checkout doesn't change. To run a recipe without writing a script, use the `orca` CLI from the repo root: `pnpm orca run fix-ci --repo /tmp/orca-demo --set command="npx tsc --noEmit"`.
 
 ## How it works
 
-`engine.start()` → `runRecipe` runs the top-level flow: **validate → plan → validate graph → (approve) → schedule → finish**. `schedule` drives tasks in dependency order up to `maxWorkers`, each through `runTask`, which is the retry loop: fresh worktree → messenger → gates → (retry with feedback | done | give up). A `Budget` caps cost and time; an `AbortController` powers cancel. When `traceDir` is set, every event is teed to `events.jsonl` and the result to `summary.json`.
+`engine.start()` calls `runRecipe`, which validates the input, plans, validates the task graph, waits for approval if asked, schedules, and finishes. `schedule` runs tasks in dependency order, up to `maxWorkers` at once, each through `runTask`. `runTask` is the retry loop. It creates a fresh worktree, calls the messenger, runs the gates, and then retries with feedback, finishes the task, or gives up. A `Budget` tracks cost and time, and an `AbortController` handles cancel. A chain goes through `runChain` instead, which validates input and calls the chain's `run()`. When `traceDir` is set, the engine appends every event to `events.jsonl` and writes the result to `summary.json`.
 
-See [`Engine Design`](https://claude.ai/artifact/BQUsq8wFy1DeeSVThPZTzy) for the full design doc this package was built from.
+The design doc this package was built from is [Engine Design](https://claude.ai/artifact/BQUsq8wFy1DeeSVThPZTzy).

@@ -167,7 +167,7 @@ describe("engine — budget & cancel", () => {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const { stdout } = await promisify(execFile)("git", ["worktree", "list"], { cwd: repo });
-    expect(stdout).not.toContain(".orchestra");
+    expect(stdout).not.toContain(".orca");
   });
 });
 

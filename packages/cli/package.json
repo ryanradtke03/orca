@@ -1,0 +1,21 @@
+{
+  "name": "@orchestra/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "orca": "./bin/orca.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@orchestra/engine": "workspace:*",
+    "@orchestra/messenger": "workspace:*",
+    "@orchestra/recipes": "workspace:*",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  }
+}
