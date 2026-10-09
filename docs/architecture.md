@@ -1,207 +1,221 @@
-Architecture · how the pieces fit · the engine↔recipe loop
-
 # Architecture
 
-How Orca is put together, and what actually happens when a recipe runs. The per-recipe shape lives in [the catalog](./recipe-catalog.md); this doc is the runtime around it.
+This doc covers how Orca's packages fit together and what happens, step by step, when a recipe runs. [The recipe catalog](./recipe-catalog.md) describes each recipe. This doc describes the runtime that runs them.
 
 ## The four packages
 
-The dependency spine is strict and one-directional: `messenger ← engine ← recipes ← cli`. Messenger knows nothing about the engine; the engine knows nothing about any concrete recipe.
+Each package depends only on the ones below it. The messenger knows nothing about the engine, and the engine knows nothing about any specific recipe.
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│  cli  (@orchestra/cli)                            ⚠ empty stub today │
-│  Planned entry point: parse args → createEngine({ messenger })       │
-│  → register recipes → run one, stream EngineEvents to the terminal   │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │ depends on ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  recipes  (@orchestra/recipes)        deps: engine, messenger, zod   │
-│  The catalog of concrete jobs:                                       │
-│    repro-bug · fix-ci · fix-lint · update-tests · add-component      │
-│    pr-describe · pr-review · bug-to-pr (a CHAIN composing the above) │
-│  Each defineRecipe: plan() → worker() → gates → finish()             │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │ built on ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  engine  (@orchestra/engine)             deps: messenger, zod        │
-│  The orchestration runtime. createEngine({ messenger, limits… }):    │
-│    plan → scheduler/queue → per-task git WORKTREE → worker →         │
-│    gates (verify) → retry with feedback → finish                     │
-│    + budget, tracer, PrSink (github|local), chains (shared budget)   │
-└──────────────────────────────┬───────────────────────────────────────┘
-                               │ drives Claude through ▼
-┌────────────────────────────────────────────────────────────────────┐
-│  messenger  (@orchestra/messenger)                   deps: zod only  │
-│  The Claude adapter — lowest layer, no orchestration knowledge.      │
-│    Messenger.send(req) → MessengerRun { events (stream), done }      │
-│    CliMessenger → spawns the `claude` binary                         │
-│    FakeMessenger → replays .jsonl fixtures (tests)                   │
-│    done event carries: ok, text, sessionId, costUsd, turns           │
-└──────────────────────────────┬───────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│  cli  (@orchestra/cli)      deps: engine, messenger, recipes, zod, tsx │
+│  The orca binary. Most commands call loadConfig(flags), then           │
+│  buildEngine(config), then the engine: recipes(), runs(), or           │
+│  start() with streamEvents() printing progress to stderr.              │
+└──────────────────────────────┬─────────────────────────────────────────┘
+                               │ depends on
+┌──────────────────────────────▼─────────────────────────────────────────┐
+│  recipes  (@orchestra/recipes)          deps: engine, messenger, zod   │
+│  The concrete jobs:                                                    │
+│    repro-bug, fix-ci, fix-lint, update-tests, add-component,           │
+│    pr-describe, pr-review, and the bug-to-pr chain                     │
+│  Each recipe supplies plan(), worker(), gates, and finish().           │
+└──────────────────────────────┬─────────────────────────────────────────┘
+                               │ depends on
+┌──────────────────────────────▼─────────────────────────────────────────┐
+│  engine  (@orchestra/engine)                    deps: messenger, zod   │
+│  Runs jobs. For each task: a git worktree, a worker, the gates,        │
+│  and retries with feedback. Also budgets, traces, PR sinks             │
+│  (github or local), and chains of child runs.                          │
+└──────────────────────────────┬─────────────────────────────────────────┘
+                               │ calls Claude through
+┌──────────────────────────────▼─────────────────────────────────────────┐
+│  messenger  (@orchestra/messenger)                        deps: zod    │
+│  The only code that starts Claude Code.                                │
+│    Messenger.send(req) returns a run with an event stream and a done   │
+│    CliMessenger spawns the claude binary                               │
+│    FakeMessenger replays recorded .jsonl fixtures for tests            │
+└──────────────────────────────┬─────────────────────────────────────────┘
                                ▼
-                     the `claude` CLI process
+                     the claude CLI process
 ```
 
-- **messenger** turns a `MessengerRequest` into a spawned `claude` process and streams events back, ending in a `done` with cost/session. The backend is swappable (real CLI vs. fixtures), so the engine never spawns a process itself.
-- **engine** owns all the machinery: validating input, planning, running tasks concurrently in isolated git worktrees, verifying with gates, retrying, enforcing a budget, opening PRs via a `PrSink`, recording traces.
-- **recipes** are the only package that names concrete jobs. `bug-to-pr` is a chain that wires `repro-bug → fix-ci → (pr-describe ∥ pr-review) → open PR`.
-- **cli** is an empty `src/` today. Until it lands, a run starts programmatically: `createEngine({ messenger }).run(name, input)`.
+- **messenger** turns a `MessengerRequest` into a `claude` process and streams its events back. Every run ends with one `done` event that carries `ok`, the reply text, the session id, and the cost. The backend is swappable, so the engine never starts a process itself.
+- **engine** validates input, plans, runs tasks in parallel in separate git worktrees, checks each attempt with gates, retries, enforces the budget, opens PRs through a `PrSink`, and writes traces.
+- **recipes** is the only package that names concrete jobs. `bug-to-pr` is a chain: it runs `repro-bug`, then `fix-ci`, then `pr-describe` and `pr-review` in parallel, and then opens the PR.
+- **cli** is the `orca` binary. `packages/cli/src/engine-factory.ts` builds the engine from the resolved config, and `packages/cli/src/events.ts` prints the event stream. Code can also skip the CLI and call `createEngine(...)` and `engine.start(name, input)` directly.
 
-## The engine↔recipe contract
+## How the engine and a recipe work together
 
-Interaction is inversion of control: a recipe is a passive object of hooks, and the engine is the driver that calls those hooks in a fixed order. **The recipe decides; the engine runs everything.** A recipe never calls the engine.
+A recipe is a set of hooks, and the engine calls them in a fixed order. The recipe makes the decisions and the engine runs everything. A recipe never calls the engine.
 
-A recipe (`packages/engine/src/types.ts`, `Recipe`) is five things the engine asks for:
+A recipe (`Recipe` in `packages/engine/src/types.ts`) gives the engine these things:
 
 ```ts
 interface Recipe<Input, Output> {
-  input:  z.ZodType<Input>;                 // schema, validated before anything runs
-  plan:   (input, ctx) => Promise<Task[]>;  // what work exists
-  worker: (task,  ctx) => WorkerConfig;      // the prompt + tools for one task
-  gates:  Gate[];                            // code that grades the worker's output
-  finish: (results, ctx) => Promise<Output>; // fold task results into the answer
-  onFailed?(task, reasons, ctx);             // optional
+  input:  z.ZodType<Input>;                  // validated before anything runs
+  plan:   (input, ctx) => Promise<Task[]>;   // which work exists
+  worker: (task, ctx) => WorkerConfig;       // the prompt and tools for one task
+  gates:  Gate[];                            // code that checks the worker's result
+  finish: (results, ctx) => Promise<Output>; // combines task results into the output
+  onFailed?(task, reasons, ctx);             // optional, called when a task gives up
 }
 ```
 
-`defineRecipe()` (`packages/engine/src/recipe.ts`) is a typed identity function — it does nothing at runtime, it only lets `plan`/`worker`/`finish` infer the input type from the Zod schema.
+`defineRecipe()` in `packages/engine/src/recipe.ts` returns its argument unchanged. It does nothing at run time. It exists so TypeScript can infer the input type of `plan`, `worker`, and `finish` from the Zod schema.
 
-The recipe receives a `Ctx` (`types.ts`, `Ctx`) with `messenger`, `exec`, `emit`, `signal`, but it only *reads* from it (e.g. `ctx.exec` in `plan()` to check whether there's work). Worktree creation, the actual `messenger.send`, cost accounting, retries, and cleanup are all the engine's.
+Each hook receives a `Ctx` with `repo`, `messenger`, `exec`, `emit`, and `signal`. Recipes use it to look and ask, not to run things. `fix-ci`, for example, calls `ctx.exec` in `plan()` to see whether the command already passes. The engine creates worktrees, calls `messenger.send`, counts cost, retries, and cleans up.
 
-### The driver — `runRecipe()` (`packages/engine/src/lifecycle.ts`)
+### The driver: `runRecipe()` in `packages/engine/src/lifecycle.ts`
 
 ```
-1. recipe exists?            → else unknown_recipe
-2. recipe.input.safeParse()  → else invalid_input   (nothing runs on bad input)
+1. Look up the recipe. If it's missing, end with unknown_recipe.
+2. recipe.input.safeParse(input). If it fails, end with invalid_input. Nothing runs.
 3. tasks = recipe.plan(input, ctx)
-4. validateGraph(tasks) + optional plan approval
-5. schedule(tasks, runTask, ctx)   ← respects maxWorkers + dependsOn
-6. budget/cancel short-circuits → partial / cancelled  (no finish())
-7. output = recipe.finish(results, ctx) → status: completed | partial | failed
+4. validateGraph(tasks), then wait for approval if approvePlan is set.
+5. schedule(tasks, runTask, ctx), which respects maxWorkers and dependsOn.
+6. If the budget ran out or the run was cancelled, end as partial or cancelled
+   without calling finish().
+7. output = recipe.finish(results, ctx). The status is completed when every task
+   succeeded, failed when none did, and partial otherwise.
 ```
 
-Every exit — including a throw inside the recipe's own hooks — is caught and turned into a clean `RunResult`.
+Every way out of a run ends in a `RunResult`. If `plan()` throws, the run ends with `plan_failed`. If `finish()` throws, it ends with `finish_failed`. If anything else throws, such as `worker()`, the engine catches it in `packages/engine/src/run.ts` and the run ends `failed` with `plan_failed`.
 
-### Chains differ
+### Chains
 
-A `Chain` (like `bug-to-pr`) is registered alongside recipes but has no `plan`/`worker`/`gates`. Its `run(input, ctx)` gets a richer `ChainCtx` (`types.ts`, `ChainCtx`) with `run` (start a child recipe), `git`, `pr`, and `step()`. A chain interacts with the engine by launching other runs through `ctx.run(...)`, each going through the full `runRecipe → runTask` loop, all sharing one budget.
+A chain such as `bug-to-pr` sits in the same registry as recipes, but it has no `plan`, `worker`, or `gates`. Its `run(input, ctx)` receives a `ChainCtx` (in `types.ts`) with four extra members: `run` starts a child recipe, `git` commits diffs onto branches, `pr` reads issues and opens PRs, and `step()` wraps a block of plain code with `step.started` and `step.done` events.
+
+Each `ctx.run(...)` goes through the same `runRecipe` and `runTask` loop as a top-level run. A child's spending counts against the parent's budget, and the chain can give a child a lower cost cap of its own. Child runs can nest 3 levels deep.
 
 ## A full trace: `fix-ci`
 
-Input: `{ command: "pnpm check" }`. Recipe source: `packages/recipes/src/fix-ci/index.ts`. Each line is labeled by who acts.
+The input is `{ command: "pnpm check" }`, and the recipe source is `packages/recipes/src/fix-ci/index.ts`. Each line starts with the actor.
 
 ```
-user:      run "fix-ci" with { command: "pnpm check" }
-           (today: createEngine({ messenger }).run("fix-ci", { command: "pnpm check" }))
+user:      orca run fix-ci --set command="pnpm check"
+           (in code: engine.start("fix-ci", { command: "pnpm check" }))
 ```
 
-### Setup & validation — `runRecipe()`
+### Setup and validation in `runRecipe()`
 
 ```
-engine:    look up "fix-ci"                     → found ✓   (else unknown_recipe)
-engine:    emit { type: "run.started" }         → user sees it start
-engine:    fixCi.input.safeParse(…)             → valid ✓   (else invalid_input)
-engine:    ensureExcluded(repo)                 (gitignore the worktree dir)
+engine:    look up "fix-ci"                  found (otherwise unknown_recipe)
+engine:    emit { type: "run.started" }      the user sees the run start
+engine:    fixCi.input.safeParse(input)      valid (otherwise invalid_input)
+engine:    ensureExcluded(repo)              add .orca/ to .git/info/exclude
 ```
 
-### plan() — the recipe decides if there's work
+### `plan()`: the recipe decides whether there is work
 
 ```
 engine:    call fixCi.plan(input, ctx)
-recipe:      ctx.exec("pnpm check")       ← recipe asks the ENGINE to run it in repo root
-engine:        runs it, returns { code, output }
-recipe:      code !== 0 → build ONE task:
-               { id:"fix", goal:"Make `pnpm check` pass",
-                 context:{ command, failure: tail(output, 6000) } }
-           ── if code === 0 → return [] → no worker, straight to finish ──
-engine:    validateGraph([fix])  → ok
-engine:    emit { type:"plan.ready", tasks:[fix] }   → user sees the plan
-engine:    optional plan approval — skipped unless approvePlan is set
+recipe:      ctx.exec("pnpm check")          the engine runs it in the repo root
+engine:        returns { code, output }
+recipe:      code is not 0, so return one task:
+               { id: "fix", goal: "Make `pnpm check` pass",
+                 context: { command, failure: <last 6000 characters of output> } }
+           (if code is 0, plan returns [] and the run goes straight to finish)
+engine:    validateGraph([fix])              ok
+engine:    emit { type: "plan.ready", tasks: [fix] }
+engine:    skip plan approval unless approvePlan is set
 ```
 
-### schedule → runTask() — the attempt loop (`packages/engine/src/task.ts`), maxAttempts=3
+### `runTask()`: the attempt loop in `packages/engine/src/task.ts`
 
-Attempt 1:
+`maxAttempts` defaults to 3. Attempt 1:
 
 ```
-engine:    createWorktree(repo, runId, "fix", attempt=1)   ← isolated git checkout
-engine:    emit { type:"task.started", worktree }
+engine:    createWorktree(repo, runId, "fix", attempt 1)    a separate git checkout
+engine:    emit { type: "task.started", worktree }
 
 engine:    call fixCi.worker(task, ctx)
-recipe:      return WorkerConfig {
-               prompt: "Make `pnpm check` pass… Current failure:\n```\n<failure>\n```",
-               tools:  [Read, Edit, Grep, Glob, Bash(pnpm check), Bash(pnpm test:*), …],
-               maxTurns: 25 }                              ← recipe only produces the prompt
+recipe:      return {
+               prompt: "Make `pnpm check` pass. Fix the root cause in the source code.
+                        Current failure: <failure>",
+               tools: [Read, Edit, Grep, Glob, Bash(pnpm check),
+                       Bash(pnpm test:*), Bash(pnpm typecheck:*)],
+               maxTurns: 25 }
 
 engine:    messenger.send({ prompt, cwd: worktree, tools, maxTurns, signal })
-messenger:   spawn the `claude` binary in the worktree
-claude:        reads files, edits source, runs `pnpm check` itself, iterates…
-messenger:   stream events  → engine re-emits each as { type:"worker.event" } → user
-messenger:   done → { ok:true, text, costUsd, sessionId }
-engine:    budget.add(costUsd)                             ← engine owns cost accounting
-engine:    getDiff(worktree)  → { patch, changedFiles }
+messenger:   start claude in the worktree
+claude:        reads files, edits source, runs pnpm check, repeats
+messenger:   stream events; the engine re-emits each one as worker.event
+messenger:   done { ok: true, text, costUsd, sessionId }
+engine:    budget.add(costUsd)
+engine:    getDiff(worktree)                 stages everything, returns { patch, files }
 ```
 
-### gates — code grades the work (the worker never grades itself)
+If the worker itself fails, for example by hitting `maxTurns`, the engine skips the gates and uses `worker failed: <kind>: <message>` as the rejection reason.
+
+### Gates: code checks the work
+
+The worker never grades itself.
 
 ```
 engine:    runGates(fixCi.gates, gateCtx)
-           gateCtx = { worktree, diff, changedFiles, output, exec }
-recipe-gate: noFileChanges(TEST_AND_CONFIG)  → did the diff touch *.test.*, tsconfig,
-             package.json?   (cheap: filenames only)
-recipe-gate: noPattern(CHEATS)               → were @ts-ignore / as any / .skip( added?
-             (cheap: added lines only)
-recipe-gate: commandPasses(task => "pnpm check")
-engine:        gate calls gateCtx.exec("pnpm check") INSIDE the worktree  (expensive)
+           gateCtx = { worktree, task, diff, changedFiles, output, exec }
+gate 1:    noFileChanges(TEST_AND_CONFIG)    did the diff change a test file,
+                                             tsconfig, package.json, or vitest config?
+                                             Checks file names only, so it's cheap.
+gate 2:    noPattern(CHEATS)                 did an added line contain @ts-ignore,
+                                             eslint-disable, .skip(, as any, or similar?
+                                             Checks added lines only, so it's cheap.
+gate 3:    commandPasses("pnpm check")       runs pnpm check inside the worktree.
+                                             This is the expensive one, so it runs last.
 ```
 
-Branch A — all gates pass (`reasons` empty):
+If every gate passes:
 
 ```
-engine:    emit { type:"task.done", attempts:1, costUsd }
-engine:    return TaskResult { ok:true, diff, output, worktree }
+engine:    emit { type: "task.done", attempts: 1, costUsd }
+engine:    return { ok: true, diff, output, worktree }
 ```
 
-Branch B — a gate fails (e.g. Claude added `as any`, or `pnpm check` still red):
+If a gate fails, for example because Claude added `as any`:
 
 ```
-engine:    feedback = reasons   (e.g. ["added forbidden pattern: as any"])
-engine:    emit { type:"task.retrying", attempt:1, reasons }
+engine:    reasons = ["added line matches disallowed pattern /\bas any\b/: <the line>"]
+engine:    emit { type: "task.retrying", attempt: 1, reasons }
 engine:    removeWorktree(attempt 1)
-engine:    ── Attempt 2 ──
-engine:    worker() again; withFeedback() prepends to the prompt:
+engine:    attempt 2: a fresh worktree, worker() again, and withFeedback() adds
+           this after the prompt:
              "Your previous attempt was rejected. Fix these problems and try again:
-              - added forbidden pattern: as any"           ← engine loops gate reasons back to Claude
-           … same messenger → claude → gates loop, up to maxAttempts (3) …
-           if still failing:
-engine:    call fixCi.onFailed?(…)  → fix-ci has none, skip
-engine:    emit { type:"task.failed", reasons }
-engine:    return TaskResult { ok:false, failures:reasons }
+              - added line matches disallowed pattern /\bas any\b/: <the line>"
+           The same send, gates, and retry loop runs up to maxAttempts times.
+           The engine also stops retrying if the run is cancelled or out of budget.
+           If the last attempt still fails:
+engine:    call fixCi.onFailed if it exists (fix-ci has none)
+engine:    emit { type: "task.failed", reasons }
+engine:    return { ok: false, failures: reasons }
 ```
 
-### finish() — recipe folds results into the answer
+The engine doesn't emit `task.retrying` after the last attempt, and it keeps that attempt's worktree until cleanup.
+
+### `finish()`: the recipe builds the output
 
 ```
-engine:    cleanupWorktrees()   (keepWorktrees policy: drop on success, etc.)
+engine:    cleanupWorktrees()                with the default on-failure policy, removes
+                                             worktrees of tasks that succeeded
 engine:    call fixCi.finish(results, ctx)
-recipe:      return { fixed: results.every(r => r.ok),   ← [] already-green also → true
-                      diffs: results.map(r => r.diff) }
-engine:    decide status from results: completed | partial | failed
-engine:    return RunResult { ok, status, output, costUsd, durationMs, tracePath }
+recipe:      return { fixed: results.every((r) => r.ok),
+                      diffs: results.map((r) => r.diff) }
+             (with no tasks, fixed is true: the command was already passing)
+engine:    status: completed, partial, or failed, from the task results
+engine:    return { ok, status, output, tasks, costUsd, durationMs, tracePath }
 
-user:      receives RunResult → { ok:true, status:"completed",
-                                  output:{ fixed:true, diffs:[<patch>] } }
+user:      { ok: true, status: "completed",
+             output: { fixed: true, diffs: [<patch>] } }
 ```
 
 ### Who does what
 
 | Actor | Does |
-|---|---|
-| **user** | names the recipe + input; gets a `RunResult`; sees streamed events |
-| **engine** | validates input, calls `plan`/`worker`/`gates`/`finish`, makes worktrees, accounts budget, retries with feedback, decides final status — owns all machinery |
-| **recipe** | *decides*: is there work (`plan`), what to tell Claude (`worker`), what counts as success (`gates`), what to return (`finish`) — runs nothing itself |
-| **messenger** | turns `worker`'s prompt into a spawned `claude` process; streams events; reports `ok`/`costUsd` |
-| **claude** | reads/edits code and runs the command inside the isolated worktree |
+| --- | --- |
+| user | names the recipe and input, watches the events, and gets a `RunResult` |
+| engine | validates input; calls `plan`, `worker`, the gates, and `finish`; creates worktrees; tracks the budget; retries with feedback; and decides the final status |
+| recipe | decides whether there is work (`plan`), what to tell Claude (`worker`), what counts as success (`gates`), and what to return (`finish`). It runs nothing itself. |
+| messenger | turns the worker's prompt into a `claude` process, streams its events, and reports `ok` and `costUsd` |
+| claude | reads and edits code and runs the command inside the worktree |
 
-The point `fix-ci` makes: `worker()` only *asks* Claude to make the command pass — it's the **gates** (`commandPasses`) that independently re-run `pnpm check` in the worktree to verify it, and `noFileChanges`/`noPattern` that stop Claude cheating by editing tests or adding `as any`. The engine is what loops that verification back into the next prompt.
+In `fix-ci`, `worker()` only asks Claude to make the command pass. The `commandPasses` gate checks that claim by running `pnpm check` again in the worktree. `noFileChanges` and `noPattern` reject attempts that edit tests or config or add `as any` to get there. The engine copies each rejection reason into the next attempt's prompt.
