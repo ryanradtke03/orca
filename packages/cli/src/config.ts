@@ -50,6 +50,9 @@ export const OrcaConfigSchema = z.object({
   backend: z.enum(["cli", "fake"]).default("cli"),
   // Partial so any omitted limit falls through to the engine's DEFAULT_LIMITS.
   limits: z.object(limitsShape).partial().default({}),
+  // Turns per worker attempt, by recipe name, e.g. { "repro-bug": 60 }. A recipe left
+  // out keeps its own maxTurns. Names are checked against the registry in buildEngine.
+  maxTurns: z.record(z.string(), z.number().int().positive()).optional(),
   // Left undefined so the engine applies its own default location.
   worktreeDir: z.string().optional(),
   // The engine has no trace-dir default; the CLI defaults it later (step 4) so `orca

@@ -95,6 +95,7 @@ All fields are optional. This `.orca.json` sets every one of them:
     "maxCostUsd": 2.5,
     "maxDurationMs": 1200000
   },
+  "maxTurns": { "repro-bug": 60 },
   "traceDir": ".orca/traces",
   "worktreeDir": "/abs/path/to/repo/.orca/worktrees",
   "keepWorktrees": "on-failure"
@@ -108,6 +109,7 @@ All fields are optional. This `.orca.json` sets every one of them:
 | `pr` | `{ "kind": "local", "dir": "..." }` or `{ "kind": "github", "remote": "..." }`. `dir` and `remote` are optional. | the local sink, writing to `<repo>/.orca`. `--github` switches to GitHub. |
 | `backend` | `"cli"` | `"cli"`. The schema also accepts `"fake"`, but Orca rejects it at run time because it only works with test fixtures. |
 | `limits` | any of `maxWorkers`, `maxAttempts`, and `maxDurationMs` as positive whole numbers, and `maxCostUsd` as a positive number | 2 workers, 3 attempts, $3, and 30 minutes |
+| `maxTurns` | recipe names mapped to positive whole numbers: the turns each worker attempt gets. A name that isn't a recipe is an error. | each recipe's own setting, such as 40 for `repro-bug` |
 | `traceDir` | a path, resolved relative to the repo | `<repo>/.orca/traces` |
 | `worktreeDir` | an absolute path | `<repo>/.orca/worktrees` |
 | `keepWorktrees` | `"always"`, `"on-failure"`, or `"never"` | `"on-failure"` |

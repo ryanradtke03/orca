@@ -163,6 +163,7 @@ export function createEngine(config: EngineConfig): Engine {
       exec: execInRepo(baseWorktree ?? config.repo),
       runId: p.id,
       limits: p.limits,
+      maxTurns: config.maxTurns,
       budget,
       keepWorktrees,
       worktreeDir: config.worktreeDir,

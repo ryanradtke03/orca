@@ -67,6 +67,13 @@ describe("commandPasses", () => {
     );
     expect(res.ok).toBe(true);
   });
+
+  it("can build the command from the gate context (the files the worker changed)", async () => {
+    const res = await commandPasses((_t, g) => `test "${g.changedFiles[0]}" = pkg/a.ts`).check(
+      gctx(repo, { changedFiles: ["pkg/a.ts"] }),
+    );
+    expect(res.ok).toBe(true);
+  });
 });
 
 describe("commandFails", () => {

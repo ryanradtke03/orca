@@ -11,6 +11,7 @@ import {
   type EngineConfig,
   type EngineLimits,
   githubSink,
+  isChain,
   localSink,
   type PrSink,
 } from "@orchestra/engine";
@@ -51,11 +52,30 @@ export function buildEngine(config: ResolvedOrcaConfig, deps: BuildEngineDeps = 
     // keys entirely (never sets them to undefined), so the values already match — the
     // cast only reconciles the two packages' exactOptionalPropertyTypes views.
     limits: config.limits as Partial<EngineLimits>,
+    maxTurns: checkMaxTurns(config.maxTurns),
     worktreeDir: config.worktreeDir,
     traceDir: config.traceDir,
     keepWorktrees: config.keepWorktrees,
   };
   return createEngine(engineConfig);
+}
+
+/** A maxTurns key that names no recipe is almost always a typo, and would otherwise be
+ *  ignored without a word — so it's a CliError. Chains run no workers, so they're out too. */
+function checkMaxTurns(
+  maxTurns: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (!maxTurns) return undefined;
+  const recipes = Object.entries(builtInRecipes)
+    .filter(([, r]) => !isChain(r))
+    .map(([name]) => name);
+  const unknown = Object.keys(maxTurns).filter((name) => !recipes.includes(name));
+  if (unknown.length > 0) {
+    throw new CliError(
+      `invalid config: maxTurns: no recipe named ${unknown.map((n) => `"${n}"`).join(", ")} (recipes: ${recipes.join(", ")})`,
+    );
+  }
+  return maxTurns;
 }
 
 /** Pick the messenger: an injected one wins; otherwise build from the backend. The

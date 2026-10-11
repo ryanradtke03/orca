@@ -51,6 +51,17 @@ describe("buildEngine", () => {
     expect(() => buildEngine(config({ backend: "cli" }))).not.toThrow();
   });
 
+  it("accepts maxTurns keyed by a known recipe", () => {
+    expect(() => buildEngine(config({ maxTurns: { "repro-bug": 60 } }), fake)).not.toThrow();
+  });
+
+  it("refuses maxTurns for an unknown recipe or a chain with a CliError", () => {
+    expect(() => buildEngine(config({ maxTurns: { "repro-bgu": 60 } }), fake)).toThrow(
+      /no recipe named "repro-bgu"/,
+    );
+    expect(() => buildEngine(config({ maxTurns: { "bug-to-pr": 60 } }), fake)).toThrow(CliError);
+  });
+
   it("refuses the fake backend from config with a CliError (fixtures live in tests only)", () => {
     expect(() => buildEngine(config({ backend: "fake" }))).toThrow(CliError);
   });

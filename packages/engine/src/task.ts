@@ -43,7 +43,7 @@ export async function runTask(task: Task, recipe: AnyRecipe, ctx: RunCtx): Promi
       prompt: withFeedback(cfg.prompt, feedback),
       cwd: worktree.path,
       tools: cfg.tools,
-      maxTurns: cfg.maxTurns,
+      maxTurns: ctx.maxTurns?.[recipe.name] ?? cfg.maxTurns,
       model: cfg.model,
       system: cfg.system,
       signal: ctx.signal,

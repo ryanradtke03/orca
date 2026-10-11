@@ -35,6 +35,16 @@ describe("OrcaConfigSchema", () => {
     expect(config.limits).toEqual({ maxCostUsd: 2.5 });
   });
 
+  it("accepts per-recipe maxTurns overrides", () => {
+    const config = OrcaConfigSchema.parse({ maxTurns: { "repro-bug": 60 } });
+    expect(config.maxTurns).toEqual({ "repro-bug": 60 });
+  });
+
+  it("rejects a non-positive or fractional maxTurns", () => {
+    expect(OrcaConfigSchema.safeParse({ maxTurns: { "repro-bug": 0 } }).success).toBe(false);
+    expect(OrcaConfigSchema.safeParse({ maxTurns: { "repro-bug": 2.5 } }).success).toBe(false);
+  });
+
   it("rejects an unknown pr kind", () => {
     const result = OrcaConfigSchema.safeParse({ pr: { kind: "gitlab" } });
     expect(result.success).toBe(false);

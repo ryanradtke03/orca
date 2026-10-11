@@ -1,4 +1,4 @@
-import type { Gate, Task } from "../types.js";
+import type { Gate, GateContext, Task } from "../types.js";
 
 /** One failing test, as a parser pulls it out of a test runner's JSON report. */
 export interface ParsedFailure {
@@ -41,7 +41,7 @@ const NOT_AN_ASSERTION = [
  * fails the gate via runGates' catch, which is the correct verdict here.
  */
 export function failsWithAssertion(
-  command: string | ((task: Task) => string),
+  command: string | ((task: Task, ctx: GateContext) => string),
   parse: (output: string) => ParsedFailure[],
   opts: { timeoutMs?: number; runs?: number } = {},
 ): Gate {
@@ -50,7 +50,7 @@ export function failsWithAssertion(
   return {
     name: "failsWithAssertion",
     async check(ctx) {
-      const cmd = typeof command === "function" ? command(ctx.task) : command;
+      const cmd = typeof command === "function" ? command(ctx.task, ctx) : command;
 
       const sets: string[][] = [];
       for (let i = 0; i < runs; i++) {
