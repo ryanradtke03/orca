@@ -43,6 +43,17 @@ async function defaultBranch(repo: string): Promise<string | null> {
   }
 }
 
+/** True when a local branch, or a remote-tracking one on any remote, has this name. */
+async function branchTaken(repo: string, name: string): Promise<boolean> {
+  const refs = await git(repo, [
+    "for-each-ref",
+    "--format=%(refname)",
+    `refs/heads/${name}`,
+    `refs/remotes/*/${name}`,
+  ]);
+  return refs !== "";
+}
+
 const ORCA_BRANCH = /^orca\//;
 
 export interface GitHelperOptions {
@@ -64,8 +75,16 @@ export function createGitHelpers(repo: string, opts: GitHelperOptions = {}): Git
     async commit(branch: string, commit: GitCommitOptions): Promise<string> {
       await assertUnprotected(branch);
 
-      // 1. create the branch if it's new, cut from `from` (or HEAD).
-      if (!(await refExists(repo, branch))) {
+      // 1. create the branch if it's new, cut from `from` (or HEAD). `from` means
+      // "start a branch", so an existing one is an error, not something to stack on:
+      // it's left from an earlier run (maybe an open PR) and a push would overwrite it.
+      if (await refExists(repo, branch)) {
+        if (commit.from !== undefined) {
+          throw new Error(
+            `branch "${branch}" already exists; start new work on an unused branch (unusedBranch)`,
+          );
+        }
+      } else {
         await git(repo, ["branch", branch, commit.from ?? "HEAD"]);
       }
 
@@ -87,6 +106,13 @@ export function createGitHelpers(repo: string, opts: GitHelperOptions = {}): Git
         // 4. remove the worktree whatever happened (keep the branch + its commit).
         await git(repo, ["worktree", "remove", "--force", wt]).catch(() => {});
         await rm(wt, { recursive: true, force: true }).catch(() => {});
+      }
+    },
+
+    async unusedBranch(name: string): Promise<string> {
+      for (let n = 1; ; n++) {
+        const candidate = n === 1 ? name : `${name}-${n}`;
+        if (!(await branchTaken(repo, candidate))) return candidate;
       }
     },
 

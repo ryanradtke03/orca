@@ -385,6 +385,19 @@ describe("bug-to-pr chain", () => {
     expect(comment).not.toContain("couldn't reproduce");
   });
 
+  it("c-rerun: a second run on the same issue gets a fresh branch, leaving the first alone", async () => {
+    await runChain(repo, { fail: new Set() }, { issue: 1 });
+    const firstHead = await git(repo, ["rev-parse", "orca/bug-1"]);
+
+    // the stand-in writes the same repro file again — the case that broke a real rerun
+    const { output } = await runChain(repo, { fail: new Set() }, { issue: 1 });
+
+    expect(output.status).toBe("pr_opened");
+    expect(output.branch).toBe("orca/bug-1-2");
+    expect(await git(repo, ["rev-parse", "orca/bug-1"])).toBe(firstHead);
+    expect(await git(repo, ["rev-list", "--count", "main..orca/bug-1-2"])).toBe("2");
+  });
+
   it("c-repro-only: fix fails — a draft PR with only the failing test", async () => {
     const { output } = await runChain(repo, { fail: new Set(["fix-ci"]) }, { issue: 1 });
 

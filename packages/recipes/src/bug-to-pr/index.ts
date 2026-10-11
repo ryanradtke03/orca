@@ -71,7 +71,7 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
     const report =
       input.report ?? (await ctx.step("read-issue", () => ctx.pr.readIssue(input.issue as number)));
     const label = input.issue !== undefined ? `#${input.issue}` : "the report";
-    const branch = `orca/bug-${input.issue ?? ctx.runId}`;
+    const branchName = `orca/bug-${input.issue ?? ctx.runId}`;
     const steps: BugToPrStep[] = [];
     const record = (name: string, r: RunResult) => {
       steps.push({ name, ok: r.ok, costUsd: r.costUsd });
@@ -104,7 +104,10 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
       return done("cannot_reproduce", { steps, costUsd: repro.costUsd });
     }
 
-    // 2. commit the failing test onto the result branch (your checkout never moves).
+    // 2. commit the failing test onto a fresh result branch (your checkout never
+    // moves). A rerun on the same issue gets orca/bug-42-2: the old branch may back
+    // an open PR, and stacking on it would mix in the old run's commits.
+    const branch = await ctx.git.unusedBranch(branchName);
     const reproDiff = diffOf(repro);
     await ctx.step("commit-test", () =>
       ctx.git.commit(branch, {
