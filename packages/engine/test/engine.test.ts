@@ -67,6 +67,30 @@ describe("engine — validation & status", () => {
     expect(result.output).toEqual({ ok: true });
   });
 
+  it("overrides a recipe's maxTurns from config.maxTurns, by recipe name", async () => {
+    const messenger = writesFile();
+    const engine = createEngine({
+      repo,
+      messenger,
+      recipes: { one: oneTask },
+      maxTurns: { one: 7, other: 99 },
+    });
+    await runToEnd(engine.start("one", {}));
+    expect(messenger.calls[0]?.maxTurns).toBe(7);
+  });
+
+  it("keeps the recipe's own maxTurns when config.maxTurns doesn't name it", async () => {
+    const messenger = writesFile();
+    const engine = createEngine({
+      repo,
+      messenger,
+      recipes: { one: oneTask },
+      maxTurns: { other: 99 },
+    });
+    await runToEnd(engine.start("one", {}));
+    expect(messenger.calls[0]?.maxTurns).toBe(1);
+  });
+
   it("treats an empty plan as a completed no-op and gives plan() a working ctx.exec", async () => {
     const messenger = writesFile();
     // plan runs `exit 0` in the repo (code 0) and returns no tasks.

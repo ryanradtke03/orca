@@ -18,6 +18,8 @@ export interface EngineConfig {
   recipes: Record<string, Registered>; // name → recipe or chain registry
   pr?: PrSink | undefined; // read issues / open PRs / comment (chains); omit outside chains
   limits?: Partial<EngineLimits> | undefined;
+  // recipe name → turns per worker attempt; overrides the recipe's own maxTurns
+  maxTurns?: Record<string, number> | undefined;
   worktreeDir?: string | undefined; // where task worktrees go (gitignored)
   traceDir?: string | undefined; // events + messenger traces per run
   keepWorktrees?: KeepWorktrees | undefined;
@@ -273,6 +275,7 @@ export interface Engine {
 export interface RunCtx extends Ctx {
   runId: string;
   limits: EngineLimits;
+  maxTurns?: Record<string, number> | undefined; // per-recipe overrides (EngineConfig.maxTurns)
   budget: Budget;
   keepWorktrees: KeepWorktrees;
   worktreeDir?: string | undefined;
