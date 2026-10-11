@@ -79,11 +79,15 @@ export const reproBug = defineRecipe({
           " too vague to turn into a test, stop and start your final message with" +
           " CANNOT_REPRODUCE: and the reason.",
         c.example ? `Match the style of ${c.example}.` : "",
+        // Denied shell calls still cost a turn, so say up front what's allowed.
+        "The only commands you can run are `pnpm vitest` and `pnpm test`. To probe the" +
+          ` code, write the check into ${c.reproFile} and run it with \`${c.command}\` —` +
+          " don't create other files or scripts.",
       ]
         .filter(Boolean)
         .join("\n\n"),
       tools: ["Read", "Grep", "Glob", "Write", "Edit", "Bash(pnpm vitest:*)", "Bash(pnpm test:*)"],
-      maxTurns: 25,
+      maxTurns: 40,
     };
   },
 

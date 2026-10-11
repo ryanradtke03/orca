@@ -26,9 +26,12 @@ const git = (cwd: string, args: string[]) =>
 
 // ── A scripted messenger the stand-in recipes drive ───────────
 // Each worker's prompt starts with a marker (SYN:<name>). The handler edits the
-// worktree for repro-bug / fix-ci, and can be told to fail a given recipe.
+// worktree for repro-bug / fix-ci, and can be told to fail a given recipe, run it
+// out of turns, or charge it more than the chain's budget.
 interface Script {
   fail: Set<string>;
+  outOfTurns?: Set<string>;
+  costUsd?: number;
 }
 
 function scriptedMessenger(script: Script): Messenger {
@@ -41,8 +44,18 @@ function scriptedMessenger(script: Script): Messenger {
         } else if (marker === "fix-ci") {
           await write(req.cwd, "src/patch.ts", "export const fixed = true;\n");
         }
+        const costUsd = script.costUsd ?? 0.001;
+        if (script.outOfTurns?.has(marker)) {
+          return {
+            type: "done",
+            ok: false,
+            costUsd,
+            turns: 1,
+            error: { kind: "max_turns", message: "Reached maximum number of turns (1)" },
+          };
+        }
         const ok = !script.fail.has(marker);
-        return { type: "done", ok, costUsd: 0.001, turns: 1 };
+        return { type: "done", ok, costUsd, turns: 1 };
       })();
       async function* events(): AsyncGenerator<MessengerEvent> {
         yield await work;
@@ -239,6 +252,31 @@ describe("bug-to-pr chain", () => {
     await expect(git(repo, ["rev-parse", "--verify", "orca/bug-1"])).rejects.toBeTruthy();
     const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
     expect(comment).toContain("couldn't reproduce");
+  });
+
+  it("c-out-of-budget: repro hits the cost limit — partial, not cannot_reproduce", async () => {
+    // one worker call costs more than the whole $3 default budget
+    const { output } = await runChain(repo, { fail: new Set(), costUsd: 5 }, { issue: 1 });
+
+    expect(output.status).toBe("partial");
+    expect(output.branch).toBeUndefined();
+    await expect(git(repo, ["rev-parse", "--verify", "orca/bug-1"])).rejects.toBeTruthy();
+    const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
+    expect(comment).toContain("ran out of budget");
+    expect(comment).not.toContain("couldn't reproduce");
+  });
+
+  it("c-out-of-turns: repro hits maxTurns — partial, not cannot_reproduce", async () => {
+    const { output } = await runChain(
+      repo,
+      { fail: new Set(), outOfTurns: new Set(["repro-bug"]) },
+      { issue: 1 },
+    );
+
+    expect(output.status).toBe("partial");
+    const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
+    expect(comment).toContain("ran out of turns");
+    expect(comment).not.toContain("couldn't reproduce");
   });
 
   it("c-repro-only: fix fails — a draft PR with only the failing test", async () => {
