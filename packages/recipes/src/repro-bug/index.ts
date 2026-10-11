@@ -8,6 +8,7 @@ import {
   onlyTouches,
 } from "@orchestra/engine";
 import { z } from "zod";
+import { changedFiles } from "../shared/diff.js";
 import { parseVitestJson } from "../shared/vitest.js";
 
 // Ways to fake a failing test without actually checking the reported behavior:
@@ -28,12 +29,27 @@ const TYPECHECK = "pnpm typecheck";
 
 interface ReproContext extends Record<string, unknown> {
   report: string;
+  // `<dir>/<name>.test.ts`. The worker may write it at the repo root or under a
+  // package (packages/foo/test/repro/…): in a monorepo the root often can't import
+  // workspace packages, so the test has to live next to the code it tests.
   reproFile: string;
-  command: string; // the test command scoped to the repro file; handed to fix-ci
+  test: string; // the test command, without a file
   example: string; // a test file to copy the style of, or "" if none found
 }
 
 const ctxOf = (context: Record<string, unknown>) => context as ReproContext;
+
+/** True when `file` is the repro file, at the root or inside a package. */
+const isReproFile = (c: ReproContext, file: string) =>
+  file === c.reproFile || file.endsWith(`/${c.reproFile}`);
+
+/** The repro file the worker actually wrote; the root path if it wrote none. */
+function writtenReproFile(c: ReproContext, changed: string[]): string {
+  return changed.find((f) => isReproFile(c, f)) ?? c.reproFile;
+}
+
+/** The test command scoped to one file — the gates run it, fix-ci gets it. */
+const commandFor = (c: ReproContext, file: string) => `${c.test} ${file}`;
 
 export const reproBug = defineRecipe({
   name: "repro-bug",
@@ -52,7 +68,7 @@ export const reproBug = defineRecipe({
     const context: ReproContext = {
       report: trim(input.report, 4000),
       reproFile,
-      command: `${input.test} ${reproFile}`,
+      test: input.test,
       example: await pickExampleTest(ctx, reproFile),
     };
     return [
@@ -73,6 +89,9 @@ export const reproBug = defineRecipe({
         `Find the code involved and write a test in ${c.reproFile} that checks the` +
           " CORRECT behavior described in the report. It must fail on the current code" +
           " because of this bug, and pass once the bug is fixed.",
+        `In a monorepo, put it under the package whose code it tests instead, keeping` +
+          ` the same relative path (e.g. packages/<pkg>/${c.reproFile}), so it can import` +
+          " that package.",
         "Keep it small: the fewest tests that show the bug. Import from the real source," +
           " and assert on the value the code returns — don't make the test throw on its own.",
         `Don't edit any other file. If the code already behaves correctly, or the report is` +
@@ -81,7 +100,8 @@ export const reproBug = defineRecipe({
         c.example ? `Match the style of ${c.example}.` : "",
         // Denied shell calls still cost a turn, so say up front what's allowed.
         "The only commands you can run are `pnpm vitest` and `pnpm test`. To probe the" +
-          ` code, write the check into ${c.reproFile} and run it with \`${c.command}\` —` +
+          ` code, write the check into the test file and run it from the repo root with` +
+          ` \`${commandFor(c, "<path to the test file>")}\` —` +
           " don't create other files or scripts.",
       ]
         .filter(Boolean)
@@ -92,20 +112,30 @@ export const reproBug = defineRecipe({
   },
 
   gates: [
-    // cheap: only the one repro file may be created or changed — not the source
-    // (that's fix-ci's job) and not other tests.
-    onlyTouches((task) => [ctxOf(task.context).reproFile]),
+    // cheap: only the repro file may be created or changed (at the root or under a
+    // package) — not the source (that's fix-ci's job) and not other tests.
+    onlyTouches((task) => {
+      const { reproFile } = ctxOf(task.context);
+      return [reproFile, `**/${reproFile}`];
+    }),
     // cheap: no suppressions, skips, hand-thrown failures or tautologies.
     noPattern(CHEATS),
     // medium: the repro file type-checks, so a "failure" isn't just a bad import.
     commandPasses(TYPECHECK),
     // medium: the test actually fails, so it shows the bug.
-    commandFails((task) => ctxOf(task.context).command),
+    commandFails((task, g) => {
+      const c = ctxOf(task.context);
+      return commandFor(c, writtenReproFile(c, g.changedFiles));
+    }),
     // medium: it fails on an assertion (not a crash) and fails the same way twice.
     // `--outputFile=/dev/stdout` forces the JSON report onto stdout: piped (non-TTY)
     // Vitest otherwise writes it to .vitest/json/output.json and prints only a notice.
     failsWithAssertion(
-      (task) => `${ctxOf(task.context).command} --reporter=json --outputFile=/dev/stdout`,
+      (task, g) => {
+        const c = ctxOf(task.context);
+        const cmd = commandFor(c, writtenReproFile(c, g.changedFiles));
+        return `${cmd} --reporter=json --outputFile=/dev/stdout`;
+      },
       (output) => parseVitestJson(output),
     ),
   ],
@@ -114,14 +144,16 @@ export const reproBug = defineRecipe({
     const task = results[0];
     const c = task ? ctxOf(task.task.context) : null;
     const reproduced = results.every((r) => r.ok) && results.length > 0;
+    const reproFile = c ? writtenReproFile(c, changedFiles(task?.diff ?? "")) : undefined;
+    // The worker's own verdict, when it gave one, beats the gate reasons: it means
+    // "this isn't a bug", where gate reasons mean "the test it wrote didn't hold up".
+    const verdict = /^\s*CANNOT_REPRODUCE:\s*([\s\S]*)/.exec(task?.output ?? "")?.[1]?.trim();
     return {
       reproduced,
-      reproFile: c?.reproFile,
-      command: c?.command,
-      // Without engine-level task output (Composition phase) the worker's
-      // CANNOT_REPRODUCE message isn't captured here, so fall back to the gate
-      // reasons from the final attempt.
-      reason: reproduced ? undefined : (task?.failures ?? []).join("\n") || undefined,
+      reproFile,
+      command: c && reproFile ? commandFor(c, reproFile) : undefined,
+      cannotReproduce: !reproduced && verdict !== undefined,
+      reason: reproduced ? undefined : verdict || (task?.failures ?? []).join("\n") || undefined,
     };
   },
 });

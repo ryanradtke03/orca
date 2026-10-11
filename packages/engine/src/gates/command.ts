@@ -1,14 +1,15 @@
-import type { Gate, Task } from "../types.js";
+import type { Gate, GateContext, Task } from "../types.js";
 
 /**
  * The command must exit 0 in the worktree. On failure, the tail of its output
  * becomes the reason, so the next attempt sees the actual errors.
  *
  * `command` may be a string, or a function of the task (fix-ci reads it from
- * task.context so the same recipe works for any command).
+ * task.context so the same recipe works for any command) and the gate context
+ * (repro-bug points it at the test file the worker actually wrote).
  */
 export function commandPasses(
-  command: string | ((task: Task) => string),
+  command: string | ((task: Task, ctx: GateContext) => string),
   opts: { timeoutMs?: number; tailLines?: number } = {},
 ): Gate {
   const tailLines = opts.tailLines ?? 20;
@@ -16,7 +17,7 @@ export function commandPasses(
   return {
     name: "commandPasses",
     async check(ctx) {
-      const cmd = typeof command === "function" ? command(ctx.task) : command;
+      const cmd = typeof command === "function" ? command(ctx.task, ctx) : command;
       const { code, stdout, stderr } = await ctx.exec(cmd, { timeoutMs: opts.timeoutMs });
       if (code === 0) return { ok: true };
 
@@ -35,11 +36,11 @@ export function commandPasses(
  *
  * `command` may be a string or a function of the task, the same as `commandPasses`.
  */
-export function commandFails(command: string | ((task: Task) => string)): Gate {
+export function commandFails(command: string | ((task: Task, ctx: GateContext) => string)): Gate {
   return {
     name: "commandFails",
     async check(ctx) {
-      const cmd = typeof command === "function" ? command(ctx.task) : command;
+      const cmd = typeof command === "function" ? command(ctx.task, ctx) : command;
       const { code } = await ctx.exec(cmd);
       if (code !== 0) return { ok: true };
       return {

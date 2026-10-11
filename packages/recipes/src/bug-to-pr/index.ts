@@ -94,11 +94,12 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
       return done("partial", { steps, costUsd: repro.costUsd });
     }
     if (!repro.ok) {
-      await comment(
-        ctx,
-        input,
-        `Orca couldn't reproduce ${label} as a failing test.\n\n${reasonOf(repro)}`,
-      );
+      // "Not a bug" (the worker's verdict) and "wrote a test that didn't hold up"
+      // (only gate reasons) are both no-repro exits, but they read very differently.
+      const said = workerSaidCannotReproduce(repro)
+        ? `Orca couldn't reproduce ${label} as a failing test.`
+        : `Orca wrote a test for ${label}, but it didn't pass Orca's checks, so there's no confirmed repro yet.`;
+      await comment(ctx, input, `${said}\n\n${reasonOf(repro)}`);
       return done("cannot_reproduce", { steps, costUsd: repro.costUsd });
     }
 
@@ -312,16 +313,21 @@ function reasonOf(r: RunResult): string {
 }
 
 /**
- * Which limit cut a run short, if any. A budget or time stop surfaces as a
- * `partial` run; a turns stop doesn't — the worker's max_turns error becomes the
- * task's failure reason (engine task.ts), so it's read from there.
+ * Which limit cut a run short, if any. A run-wide budget or time stop surfaces as
+ * a `partial` run; a worker's own turns or per-attempt time limit doesn't — its
+ * error becomes the task's failure reason (engine task.ts), so it's read from there.
  */
 function stoppedEarly(r: RunResult): "budget" | "time" | "turns" | null {
   if (r.error?.kind === "budget") return "budget";
   if (r.error?.kind === "timeout") return "time";
   const failures = r.tasks.flatMap((t) => t.failures ?? []);
   if (failures.some((f) => f.startsWith("worker failed: max_turns"))) return "turns";
+  if (failures.some((f) => f.startsWith("worker failed: timeout"))) return "time";
   return null;
+}
+
+function workerSaidCannotReproduce(r: RunResult): boolean {
+  return (r.output as { cannotReproduce?: unknown } | undefined)?.cannotReproduce === true;
 }
 
 function sum(steps: BugToPrStep[]): number {

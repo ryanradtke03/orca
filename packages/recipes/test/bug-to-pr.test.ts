@@ -26,11 +26,13 @@ const git = (cwd: string, args: string[]) =>
 
 // ── A scripted messenger the stand-in recipes drive ───────────
 // Each worker's prompt starts with a marker (SYN:<name>). The handler edits the
-// worktree for repro-bug / fix-ci, and can be told to fail a given recipe, run it
-// out of turns, or charge it more than the chain's budget.
+// worktree for repro-bug / fix-ci, and can be told to fail a given recipe (the
+// worker says CANNOT_REPRODUCE), fail it with no verdict (its test was rejected),
+// stop it on a worker limit, or charge it more than the chain's budget.
 interface Script {
   fail: Set<string>;
-  outOfTurns?: Set<string>;
+  rejected?: Set<string>;
+  stop?: Record<string, "max_turns" | "timeout">;
   costUsd?: number;
 }
 
@@ -45,17 +47,20 @@ function scriptedMessenger(script: Script): Messenger {
           await write(req.cwd, "src/patch.ts", "export const fixed = true;\n");
         }
         const costUsd = script.costUsd ?? 0.001;
-        if (script.outOfTurns?.has(marker)) {
+        const stop = script.stop?.[marker];
+        if (stop) {
           return {
             type: "done",
             ok: false,
             costUsd,
             turns: 1,
-            error: { kind: "max_turns", message: "Reached maximum number of turns (1)" },
+            error: { kind: stop, message: `stopped on ${stop}` },
           };
         }
+        if (script.rejected?.has(marker)) return { type: "done", ok: false, costUsd, turns: 1 };
         const ok = !script.fail.has(marker);
-        return { type: "done", ok, costUsd, turns: 1 };
+        const text = ok ? "done" : "CANNOT_REPRODUCE: the report describes correct behavior";
+        return { type: "done", ok, text, costUsd, turns: 1 };
       })();
       async function* events(): AsyncGenerator<MessengerEvent> {
         yield await work;
@@ -95,11 +100,13 @@ const synReproBug = defineRecipe({
   gates: [],
   async finish(results) {
     const ok = results.every((r) => r.ok) && results.length > 0;
+    const verdict = /^CANNOT_REPRODUCE: (.*)/.exec(results[0]?.output ?? "")?.[1];
     return {
       reproduced: ok,
       reproFile: "test/repro/issue-1.test.ts",
       command: String(results[0]?.task.context["command"] ?? ""),
-      reason: ok ? undefined : "the report describes correct behavior; no failing test",
+      cannotReproduce: !ok && verdict !== undefined,
+      reason: ok ? undefined : (verdict ?? "the test failed for the wrong reason"),
     };
   },
 });
@@ -269,13 +276,38 @@ describe("bug-to-pr chain", () => {
   it("c-out-of-turns: repro hits maxTurns — partial, not cannot_reproduce", async () => {
     const { output } = await runChain(
       repo,
-      { fail: new Set(), outOfTurns: new Set(["repro-bug"]) },
+      { fail: new Set(), stop: { "repro-bug": "max_turns" } },
       { issue: 1 },
     );
 
     expect(output.status).toBe("partial");
     const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
     expect(comment).toContain("ran out of turns");
+    expect(comment).not.toContain("couldn't reproduce");
+  });
+
+  it("c-worker-timeout: repro hits the per-attempt time limit — partial", async () => {
+    const { output } = await runChain(
+      repo,
+      { fail: new Set(), stop: { "repro-bug": "timeout" } },
+      { issue: 1 },
+    );
+
+    expect(output.status).toBe("partial");
+    const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
+    expect(comment).toContain("ran out of time");
+  });
+
+  it("c-repro-rejected: the test didn't pass the gates — says so, not 'couldn't reproduce'", async () => {
+    const { output } = await runChain(
+      repo,
+      { fail: new Set(), rejected: new Set(["repro-bug"]) },
+      { issue: 1 },
+    );
+
+    expect(output.status).toBe("cannot_reproduce");
+    const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
+    expect(comment).toContain("didn't pass Orca's checks");
     expect(comment).not.toContain("couldn't reproduce");
   });
 
