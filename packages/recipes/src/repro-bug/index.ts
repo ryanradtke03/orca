@@ -86,13 +86,18 @@ export const reproBug = defineRecipe({
     return {
       prompt: [
         `A user reported a bug:\n"""\n${c.report}\n"""`,
-        `Find the code involved and write a test in ${c.reproFile} that checks the` +
-          " CORRECT behavior described in the report. It must fail on the current code" +
+        `Find the code involved and write tests in ${c.reproFile} that check the` +
+          " CORRECT behavior described in the report. They must fail on the current code" +
           " because of this bug, and pass once the bug is fixed.",
+        // The fix is only aimed at what these tests check, so a test of one internal
+        // cause yields a fix for that cause alone (seen on #80).
+        "Test what the report says goes wrong — the outcome a user sees — not just one" +
+          " internal cause you found. If the report describes several symptoms or causes," +
+          " write one test for each, so the tests only pass once the whole report is fixed.",
         `In a monorepo, put it under the package whose code it tests instead, keeping` +
           ` the same relative path (e.g. packages/<pkg>/${c.reproFile}), so it can import` +
           " that package.",
-        "Keep it small: the fewest tests that show the bug. Import from the real source," +
+        "Keep each test small: the least setup that shows its symptom. Import from the real source," +
           " and assert on the value the code returns — don't make the test throw on its own.",
         `Don't edit any other file. If the code already behaves correctly, or the report is` +
           " too vague to turn into a test, stop and start your final message with" +

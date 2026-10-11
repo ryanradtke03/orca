@@ -127,6 +127,7 @@ export function makeRunCtx(opts: {
     git: {
       commit: () => Promise.reject(new Error("git helpers are not available in makeRunCtx")),
       push: () => Promise.reject(new Error("git helpers are not available in makeRunCtx")),
+      unusedBranch: () => Promise.reject(new Error("git helpers are not available in makeRunCtx")),
     },
     pr: {
       readIssue: () => Promise.reject(new Error("no PR sink in makeRunCtx")),

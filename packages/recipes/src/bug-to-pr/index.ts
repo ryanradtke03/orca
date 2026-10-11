@@ -2,8 +2,9 @@
 // a fix that makes it pass, and a review. Three child runs, two git commits and a
 // PR step, sequenced as one chain under one budget (Recipe Catalog, phase 5).
 //
-//   repro-bug  → commit the failing test → fix-ci → commit the fix
-//              → (pr-describe ∥ pr-review) → open a draft PR → comment the issue
+//   repro-bug  → commit the failing test → fix-ci → commit the fix → pr-review
+//              → [request_changes: fix-ci with the review → commit → re-review]
+//              → pr-describe → open a draft PR → comment the issue
 //
 // Every gate stays in its recipe; this file only wires them together and decides
 // which exit each failure takes.
@@ -70,7 +71,7 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
     const report =
       input.report ?? (await ctx.step("read-issue", () => ctx.pr.readIssue(input.issue as number)));
     const label = input.issue !== undefined ? `#${input.issue}` : "the report";
-    const branch = `orca/bug-${input.issue ?? ctx.runId}`;
+    const branchName = `orca/bug-${input.issue ?? ctx.runId}`;
     const steps: BugToPrStep[] = [];
     const record = (name: string, r: RunResult) => {
       steps.push({ name, ok: r.ok, costUsd: r.costUsd });
@@ -103,7 +104,10 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
       return done("cannot_reproduce", { steps, costUsd: repro.costUsd });
     }
 
-    // 2. commit the failing test onto the result branch (your checkout never moves).
+    // 2. commit the failing test onto a fresh result branch (your checkout never
+    // moves). A rerun on the same issue gets orca/bug-42-2: the old branch may back
+    // an open PR, and stacking on it would mix in the old run's commits.
+    const branch = await ctx.git.unusedBranch(branchName);
     const reproDiff = diffOf(repro);
     await ctx.step("commit-test", () =>
       ctx.git.commit(branch, {
@@ -115,7 +119,10 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
 
     // 3. make the repro test pass, working at the branch so the test actually exists.
     const command = commandOf(repro) ?? input.test;
-    const fix = record("fix-ci", await ctx.run("fix-ci", { command }, { base: branch }));
+    const fix = record(
+      "fix-ci",
+      await ctx.run("fix-ci", { command, issue: report }, { base: branch }),
+    );
 
     const evidence = buildEvidence(repro, fix, command);
 
@@ -149,7 +156,26 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
       ctx.git.commit(branch, { diff: diffOf(fix), message: `fix: ${label}` }),
     );
 
-    // 5. the shared PR tail: describe + review, then a draft PR and an issue comment.
+    // 5. review against the whole issue; on request_changes, one more fix-ci round
+    // with the findings. The tests only cover what repro-bug reproduced, so this is
+    // where a fix that leaves part of the issue open gets caught.
+    let review = record("pr-review", await runReview(ctx, input.base, branch, report));
+    const findings = review.ok ? feedbackOf(review.output as Review) : [];
+    if (findings.length > 0) {
+      const again = record(
+        "fix-ci",
+        await ctx.run("fix-ci", { command, issue: report, feedback: findings }, { base: branch }),
+      );
+      const againDiff = again.ok ? again.tasks[0]?.diff : undefined;
+      if (againDiff) {
+        await ctx.step("commit-review-fix", () =>
+          ctx.git.commit(branch, { diff: againDiff, message: `fix: address review of ${label}` }),
+        );
+        review = record("pr-review", await runReview(ctx, input.base, branch, report));
+      }
+    }
+
+    // 6. the shared PR tail: describe, then a draft PR and an issue comment.
     const pr = await openPr(ctx, {
       branch,
       base: input.base,
@@ -157,9 +183,17 @@ export const bugToPr = defineChain<BugToPrInput, BugToPrOutput>({
       report,
       evidence,
       reproOnly: false,
+      review,
     });
     steps.push(...pr.steps);
-    await comment(ctx, input, `Orca opened a draft PR for ${label}:\n${pr.url}`);
+    const open = review.ok ? (review.output as Review).unaddressed : [];
+    await comment(
+      ctx,
+      input,
+      open.length > 0
+        ? `Orca opened a draft PR for ${label}, but its review says part of the issue is still open:\n${open.map((u) => `- ${u}`).join("\n")}\n\n${pr.url}`
+        : `Orca opened a draft PR for ${label}:\n${pr.url}`,
+    );
 
     return done("pr_opened", {
       prUrl: pr.url,
@@ -180,6 +214,7 @@ interface OpenPrInput {
   report: string;
   evidence: Evidence[];
   reproOnly: boolean;
+  review?: RunResult | undefined; // already reviewed by the chain; otherwise reviewed here
 }
 
 interface OpenPrResult {
@@ -189,11 +224,12 @@ interface OpenPrResult {
 }
 
 /**
- * Review the branch and (when there's a fix) describe it, then open a draft PR
- * whose body carries both. Review failures never block the PR: a branch that
- * can't be reviewed opens marked "not reviewed", and request_changes opens with
- * the review in the body — a person still decides. A repro-only PR skips
- * pr-describe: there's no fix to describe, and its title says so plainly.
+ * Review the branch (unless the chain already did) and, when there's a fix,
+ * describe it, then open a draft PR whose body carries both. Review failures
+ * never block the PR: a branch that can't be reviewed opens marked "not reviewed",
+ * and request_changes opens with the review in the body — a person still decides.
+ * A repro-only PR skips pr-describe: there's no fix to describe, and its title
+ * says so plainly. Steps already recorded by the chain aren't returned again.
  */
 async function openPr(ctx: ChainCtx, p: OpenPrInput): Promise<OpenPrResult> {
   const steps: BugToPrStep[] = [];
@@ -204,11 +240,11 @@ async function openPr(ctx: ChainCtx, p: OpenPrInput): Promise<OpenPrResult> {
       p.reproOnly
         ? Promise.resolve(null)
         : ctx.run("pr-describe", { base: p.base, head: p.branch, issue, evidence: p.evidence }),
-      ctx.run("pr-review", { base: p.base, head: p.branch, issue: p.report }),
+      p.review ? Promise.resolve(p.review) : runReview(ctx, p.base, p.branch, p.report),
     ]),
   );
   if (describe) steps.push({ name: "pr-describe", ok: describe.ok, costUsd: describe.costUsd });
-  steps.push({ name: "pr-review", ok: review.ok, costUsd: review.costUsd });
+  if (!p.review) steps.push({ name: "pr-review", ok: review.ok, costUsd: review.costUsd });
 
   const description = describe?.ok ? (describe.output as PrDescribeResult | null) : null;
   const reviewOut = review.ok ? (review.output as Review) : null;
@@ -259,7 +295,26 @@ function renderReview(review: Review | null): string {
   for (const c of review.comments) {
     lines.push(`- ${c.severity} \`${c.file}:${c.line}\`: ${c.body}`);
   }
+  if (review.unaddressed.length > 0) {
+    lines.push("", "**Not yet resolved from the issue:**");
+    for (const u of review.unaddressed) lines.push(`- ${u}`);
+  }
   return lines.join("\n");
+}
+
+function runReview(ctx: ChainCtx, base: string, head: string, report: string): Promise<RunResult> {
+  return ctx.run("pr-review", { base, head, issue: report });
+}
+
+/** What a request_changes review asks for, as fix-ci feedback; [] on approve. */
+function feedbackOf(review: Review): string[] {
+  if (review.verdict !== "request_changes") return [];
+  return [
+    ...review.comments
+      .filter((c) => c.severity === "blocking")
+      .map((c) => `${c.file}:${c.line}: ${c.body}`),
+    ...review.unaddressed.map((u) => `Not resolved yet: ${u}`),
+  ];
 }
 
 // ── Small helpers ─────────────────────────────────────────────

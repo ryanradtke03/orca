@@ -6,8 +6,12 @@ import { parseHunks, trim } from "../shared/diff.js";
 // The review the worker must return, as JSON in its final message. Kept as a plain
 // object (ReviewObject) for the JSON Schema in the prompt, plus a refinement that
 // the gate enforces: a review requests changes exactly when it has a blocking
-// comment, so there's no "approve with blockers" or "request changes" with nothing
-// to point at.
+// comment or something the issue reports that the diff leaves unaddressed, so
+// there's no "approve with blockers" or "request changes" with nothing to point at.
+//
+// `unaddressed` is the one finding not pinned to a line: missing work has no
+// changed line to anchor to, and without it a review could only object to what
+// the diff did, never to what it left out.
 const ReviewObject = z.object({
   verdict: z.enum(["approve", "request_changes"]),
   summary: z.string().max(1000),
@@ -21,11 +25,14 @@ const ReviewObject = z.object({
       }),
     )
     .max(15),
+  unaddressed: z.array(z.string().max(400)).max(10).default([]), // parts of the issue the diff doesn't resolve
 });
 
 export const ReviewSchema = ReviewObject.refine(
-  (r) => (r.verdict === "request_changes") === r.comments.some((c) => c.severity === "blocking"),
-  "request_changes if and only if there is a blocking comment",
+  (r) =>
+    (r.verdict === "request_changes") ===
+    (r.comments.some((c) => c.severity === "blocking") || r.unaddressed.length > 0),
+  "request_changes if and only if there is a blocking comment or an unaddressed item",
 );
 
 export type Review = z.infer<typeof ReviewSchema>;
@@ -47,6 +54,7 @@ const EMPTY_REVIEW: Review = {
   verdict: "approve",
   summary: "No changes to review.",
   comments: [],
+  unaddressed: [],
 };
 
 export const prReview = defineRecipe({
@@ -61,6 +69,7 @@ export const prReview = defineRecipe({
       .array(z.string())
       .default([
         "fixes the root cause, not just the test",
+        "resolves everything the issue reports, not just part of it",
         "behavior changes outside the issue",
         "missing edge cases",
       ]),
@@ -97,6 +106,11 @@ export const prReview = defineRecipe({
         'Comment only on lines the diff adds or changes. Mark a comment "blocking" only if' +
           ' the change is wrong or incomplete; otherwise "suggestion". Request changes exactly' +
           " when you leave a blocking comment.",
+        c.issue &&
+          "If the issue reports a problem the diff doesn't resolve, list it in `unaddressed`" +
+            " (one short sentence each, saying what's still broken). These aren't pinned to" +
+            " lines, and any entry means request changes. Leave it empty when the diff resolves" +
+            " the whole issue — a reasonable design choice the issue left open isn't missing work.",
         "Only comment when it genuinely helps the author. If the change is sound, approve with" +
           " an empty comments list — do not manufacture nitpicks, style notes, or hypothetical" +
           ' "if this were reused differently" concerns just to have something to say.',

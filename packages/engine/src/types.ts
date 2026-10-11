@@ -109,7 +109,9 @@ export interface ChildRunOptions {
 export type ChildRun = (name: string, input: unknown, opts?: ChildRunOptions) => Promise<RunResult>;
 
 export interface GitCommitOptions {
-  from?: string | undefined; // the ref a new branch is cut from; default "HEAD"
+  // Starts a new branch cut from this ref (default "HEAD"). With `from`, the branch
+  // must not exist yet — pick one with unusedBranch(); without it, commits stack.
+  from?: string | undefined;
   diff: string; // a unified diff, applied with `git apply --index`
   message: string;
 }
@@ -117,6 +119,8 @@ export interface GitCommitOptions {
 /** Commit diffs onto a branch through a throwaway worktree — your checkout never moves. */
 export interface GitHelpers {
   commit(branch: string, opts: GitCommitOptions): Promise<string>; // returns the new commit sha
+  // `name`, or `name-2`, `name-3`, … — the first not taken locally or on a remote
+  unusedBranch(name: string): Promise<string>;
   push(branch: string): Promise<void>; // only orca/* branches
 }
 

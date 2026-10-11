@@ -68,6 +68,36 @@ describe("git helpers", () => {
     expect(await git(repo, ["rev-list", "--count", "HEAD..orca/bug-1"])).toBe("2");
   });
 
+  it("refuses to start a branch (`from`) that already exists, instead of stacking on it", async () => {
+    const git_ = createGitHelpers(repo);
+    const diff = await diffAdding(repo, "a.ts", "export const a = 1;\n");
+    await git_.commit("orca/bug-1", { from: "HEAD", diff, message: "first run" });
+    await expect(
+      git_.commit("orca/bug-1", { from: "HEAD", diff, message: "rerun" }),
+    ).rejects.toThrow(/already exists/);
+    expect(await git(repo, ["rev-list", "--count", "HEAD..orca/bug-1"])).toBe("1");
+  });
+
+  it("unusedBranch suffixes a name taken locally or on a remote", async () => {
+    const git_ = createGitHelpers(repo);
+    expect(await git_.unusedBranch("orca/bug-1")).toBe("orca/bug-1");
+    await git(repo, ["branch", "orca/bug-1"]);
+    // a remote-tracking ref only (e.g. a branch pushed from another machine)
+    await git(repo, ["update-ref", "refs/remotes/origin/orca/bug-1-2", "HEAD"]);
+    expect(await git_.unusedBranch("orca/bug-1")).toBe("orca/bug-1-3");
+  });
+
+  it("commits as the repo's own git identity, not a stand-in", async () => {
+    // makeScratchRepo configures "Orca Test <test@orca.dev>" locally.
+    await createGitHelpers(repo).commit("orca/bug-1", {
+      diff: await diffAdding(repo, "a.ts", "export const a = 1;\n"),
+      message: "first",
+    });
+    expect(await git(repo, ["log", "-1", "--format=%an <%ae>|%cn <%ce>", "orca/bug-1"])).toBe(
+      "Orca Test <test@orca.dev>|Orca Test <test@orca.dev>",
+    );
+  });
+
   it("refuses to commit to a protected branch", async () => {
     const git_ = createGitHelpers(repo);
     const diff = await diffAdding(repo, "x.ts", "export const x = 9;\n");
