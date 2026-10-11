@@ -118,11 +118,15 @@ export const prDescribe = defineRecipe({
     const diff = (await ctx.exec(`git diff ${input.base}...${input.head}`)).output;
     if (!diff.trim()) return []; // nothing to describe
     const log = (await ctx.exec(`git log --oneline ${input.base}..${input.head}`)).output;
+    // Trim first, then read the file list off the trimmed diff: the worker only
+    // sees `shownDiff`, so any file truncated past the budget must drop out of
+    // `files` too, or mentionsOnlyDiffFiles asks it to cover files it never saw.
+    const shownDiff = trim(diff, DIFF_BUDGET);
     const context: DescribeContext = {
       base: input.base,
       head: input.head,
-      diff: trim(diff, DIFF_BUDGET),
-      files: changedFiles(diff),
+      diff: shownDiff,
+      files: changedFiles(shownDiff),
       commits: log.trim(),
       issue: input.issue,
       evidence: input.evidence,
