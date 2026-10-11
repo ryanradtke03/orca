@@ -19,6 +19,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type BugToPrOutput, bugToPr } from "../src/bug-to-pr/index.js";
+import type { Review } from "../src/pr-review/index.js";
 
 const exec = promisify(execFile);
 const git = (cwd: string, args: string[]) =>
@@ -44,7 +45,14 @@ function scriptedMessenger(script: Script): Messenger {
         if (marker === "repro-bug") {
           await write(req.cwd, "test/repro/issue-1.test.ts", "test('bug', () => {})\n");
         } else if (marker === "fix-ci") {
-          await write(req.cwd, "src/patch.ts", "export const fixed = true;\n");
+          // a review round edits something new, so it has its own diff to commit
+          const round2 = req.prompt.includes("address-review");
+          await write(
+            req.cwd,
+            round2 ? "src/review-fix.ts" : "src/patch.ts",
+            "export const ok = 1;\n",
+          );
+          fixCalls.push(req.prompt);
         }
         const costUsd = script.costUsd ?? 0.001;
         const stop = script.stop?.[marker];
@@ -111,12 +119,36 @@ const synReproBug = defineRecipe({
   },
 });
 
+// What each fix-ci worker was asked, and the reviews pr-review hands back in order
+// (the last one repeats); both reset per test.
+let fixCalls: string[] = [];
+let reviews: Review[] = [];
+const APPROVE: Review = {
+  verdict: "approve",
+  summary: "fixes the root cause; no side effects found.",
+  comments: [],
+  unaddressed: [],
+};
+const INCOMPLETE: Review = {
+  verdict: "request_changes",
+  summary: "fixes one cause; the 200-char cap still breaks big diffs.",
+  comments: [],
+  unaddressed: ["changes[].what is still capped at 200 chars"],
+};
+
 const synFixCi = defineRecipe({
   name: "fix-ci",
   description: "",
-  input: z.object({ command: z.string() }),
-  async plan() {
-    return [{ id: "fix", goal: "SYN:fix-ci fix the source", dependsOn: [], context: {} }];
+  input: z.object({
+    command: z.string(),
+    issue: z.string().optional(),
+    feedback: z.array(z.string()).default([]),
+  }),
+  async plan(input) {
+    const goal = input.feedback.length
+      ? `SYN:fix-ci address-review ${input.feedback.join(" | ")}`
+      : `SYN:fix-ci fix the source; issue given: ${input.issue !== undefined}`;
+    return [{ id: "fix", goal, dependsOn: [], context: {} }];
   },
   worker: (task) => ({ prompt: task.goal, tools: ["Write"], maxTurns: 1 }),
   gates: [],
@@ -139,11 +171,7 @@ const synPrReview = defineRecipe({
   worker: (task) => ({ prompt: task.goal, tools: [], maxTurns: 1 }),
   gates: [],
   async finish() {
-    return {
-      verdict: "approve",
-      summary: "fixes the root cause; no side effects found.",
-      comments: [],
-    };
+    return reviews.length > 1 ? reviews.shift() : (reviews[0] ?? APPROVE);
   },
 });
 
@@ -212,6 +240,8 @@ async function runChain(repo: string, script: Script, input: Record<string, unkn
 describe("bug-to-pr chain", () => {
   let repo: string;
   beforeEach(async () => {
+    fixCalls = [];
+    reviews = [APPROVE];
     repo = await makeRepo();
     // the issue the local sink reads for a report
     await write(
@@ -248,6 +278,50 @@ describe("bug-to-pr chain", () => {
     expect(pr).toContain("Review (orca, approve)");
     const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
     expect(comment).toContain("orca/bug-1.md");
+
+    // fix-ci got the issue, and an approving review means no second fix round
+    expect(fixCalls).toEqual(["SYN:fix-ci fix the source; issue given: true"]);
+    expect(output.steps.map((st) => st.name)).toEqual([
+      "repro-bug",
+      "fix-ci",
+      "pr-review",
+      "pr-describe",
+    ]);
+  });
+
+  it("c-review-round: request_changes → one more fix with the findings, then approve", async () => {
+    reviews = [INCOMPLETE, APPROVE];
+    const { output } = await runChain(repo, { fail: new Set() }, { issue: 1 });
+
+    expect(output.status).toBe("pr_opened");
+    expect(output.verdict).toBe("approve");
+    // the second fix-ci round was handed the review's unaddressed item
+    expect(fixCalls[1]).toContain("Not resolved yet: changes[].what is still capped at 200 chars");
+    const log = await git(repo, ["log", "--format=%s", "main..orca/bug-1"]);
+    expect(log.split("\n")).toEqual(["fix: address review of #1", "fix: #1", "test: reproduce #1"]);
+    expect(output.steps.map((st) => st.name)).toEqual([
+      "repro-bug",
+      "fix-ci",
+      "pr-review",
+      "fix-ci",
+      "pr-review",
+      "pr-describe",
+    ]);
+  });
+
+  it("c-still-incomplete: says what's still open, in the PR and on the issue", async () => {
+    reviews = [INCOMPLETE]; // repeats: the second review still finds the gap
+    const { output } = await runChain(repo, { fail: new Set() }, { issue: 1 });
+
+    expect(output.status).toBe("pr_opened");
+    expect(output.verdict).toBe("request_changes");
+    expect(fixCalls).toHaveLength(2); // only one extra round
+    const pr = await readFile(path.join(repo, ".orca/prs/orca/bug-1.md"), "utf8");
+    expect(pr).toContain("Not yet resolved from the issue");
+    expect(pr).toContain("capped at 200 chars");
+    const comment = await readFile(path.join(repo, ".orca/comments/1.md"), "utf8");
+    expect(comment).toContain("part of the issue is still open");
+    expect(comment).toContain("capped at 200 chars");
   });
 
   it("c-not-a-bug: cannot reproduce — no branch, a comment explains", async () => {
