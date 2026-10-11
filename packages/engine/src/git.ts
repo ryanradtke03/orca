@@ -75,21 +75,13 @@ export function createGitHelpers(repo: string, opts: GitHelperOptions = {}): Git
       await git(repo, ["worktree", "add", wt, branch]);
 
       try {
-        // 3. apply the diff (loudly if it doesn't apply), then commit as orca.
+        // 3. apply the diff (loudly if it doesn't apply), then commit as the repo's
+        // own git identity.
         const patch = path.join(wt, ".orca-patch.diff");
         await writeFile(patch, ensureTrailingNewline(commit.diff));
         await git(wt, ["apply", "--index", patch]);
         await rm(patch, { force: true });
-        await git(wt, [
-          "-c",
-          "user.name=orca",
-          "-c",
-          "user.email=orca@users.noreply.github.com",
-          "commit",
-          "--no-verify",
-          "-m",
-          commit.message,
-        ]);
+        await git(wt, [...(await identityArgs(wt)), "commit", "--no-verify", "-m", commit.message]);
         return await git(wt, ["rev-parse", "HEAD"]);
       } finally {
         // 4. remove the worktree whatever happened (keep the branch + its commit).
@@ -106,6 +98,22 @@ export function createGitHelpers(repo: string, opts: GitHelperOptions = {}): Git
       await opts.push(branch);
     },
   };
+}
+
+/**
+ * Commit as whoever runs orca — the PR opens under their account anyway. Only a
+ * repo with no git identity gets a stand-in, and its email is on the reserved
+ * .invalid domain: GitHub links a commit to whatever account owns its email, so a
+ * plausible address (orca@users.noreply.github.com belongs to the real user
+ * "orca") would credit a stranger.
+ */
+async function identityArgs(cwd: string): Promise<string[]> {
+  const get = (key: string) => git(cwd, ["config", "--get", key]).catch(() => "");
+  const [name, email] = await Promise.all([get("user.name"), get("user.email")]);
+  return [
+    ...(name ? [] : ["-c", "user.name=orca"]),
+    ...(email ? [] : ["-c", "user.email=orca@orca.invalid"]),
+  ];
 }
 
 function ensureTrailingNewline(s: string): string {
