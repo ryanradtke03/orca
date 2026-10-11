@@ -68,6 +68,17 @@ describe("git helpers", () => {
     expect(await git(repo, ["rev-list", "--count", "HEAD..orca/bug-1"])).toBe("2");
   });
 
+  it("commits as the repo's own git identity, not a stand-in", async () => {
+    // makeScratchRepo configures "Orca Test <test@orca.dev>" locally.
+    await createGitHelpers(repo).commit("orca/bug-1", {
+      diff: await diffAdding(repo, "a.ts", "export const a = 1;\n"),
+      message: "first",
+    });
+    expect(await git(repo, ["log", "-1", "--format=%an <%ae>|%cn <%ce>", "orca/bug-1"])).toBe(
+      "Orca Test <test@orca.dev>|Orca Test <test@orca.dev>",
+    );
+  });
+
   it("refuses to commit to a protected branch", async () => {
     const git_ = createGitHelpers(repo);
     const diff = await diffAdding(repo, "x.ts", "export const x = 9;\n");

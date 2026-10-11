@@ -235,7 +235,7 @@ ctx.git.commit(branch: string, opts: { from?: string; diff: string; message: str
   // 1. if branch doesn't exist: git branch <branch> <from ?? "HEAD">
   // 2. git worktree add <tmp> <branch>
   // 3. git -C <tmp> apply --index <diff>      (fails loudly if it doesn't apply)
-  // 4. git -C <tmp> -c user.name=orca -c user.email=orca@users.noreply.github.com commit -m <message>
+  // 4. git -C <tmp> commit -m <message>   (as the repo's git identity; orca <orca@orca.invalid> if it has none)
   // 5. git worktree remove <tmp>; return the new commit sha
 
 ctx.git.push(branch: string): Promise<void>   // only via the PR sink, only orca/* branches
